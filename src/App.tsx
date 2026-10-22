@@ -914,7 +914,7 @@ export default function App() {
     document.title = t.appName;
   }, [lang, t.appName]);
 
-  const [view, setView] = useState<'chat' | 'news' | 'desert' | 'code_history' | 'admin' | 'maps_tasks'>('chat');
+  const [view, setView] = useState<'chat' | 'news' | 'desert' | 'code_history' | 'admin' | 'maps_tasks' | 'rides'>('chat');
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
     return (localStorage.getItem('ain_salah_theme') as 'light' | 'dark') || 'light';
   });
@@ -4118,7 +4118,7 @@ export default function App() {
             </div>
 
             {isSidebarNavCompact ? (
-              /* Compact Single-Row Bar Mode */
+              /* Compact Single-Row Bar Mode: Chat, News, Rafiq */
               <div className="grid grid-cols-3 gap-1">
                 <button
                   type="button"
@@ -4157,31 +4157,18 @@ export default function App() {
                 <button
                   type="button"
                   onClick={() => {
-                    setView('maps_tasks');
-                    setIsMobileSidebarOpen(false);
-                  }}
-                  title="الخريطة ومهام الواحة (Google Maps & Tasks)"
-                  className={`flex items-center justify-center gap-1 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer border ${
-                    view === 'maps_tasks'
-                      ? 'bg-emerald-600/15 border-emerald-500/40 text-emerald-500'
-                      : 'bg-[var(--bg)]/60 border-[var(--line)] text-[var(--ink)] hover:bg-[var(--bg)]'
-                  }`}
-                >
-                  <Compass className="w-3.5 h-3.5" />
-                  <span>الخريطة</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => {
-                    setIsRafiqModalOpen(true);
+                    setView('rides');
                     setIsMobileSidebarOpen(false);
                   }}
                   title="رفيق الطريق — مشاركة الرحلات بين الولايات"
-                  className="col-span-3 flex items-center justify-center gap-1.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer border bg-[var(--green)]/12 border-[var(--green)]/40 text-[var(--green)] hover:bg-[var(--green)]/20"
+                  className={`flex items-center justify-center gap-1 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer border ${
+                    view === 'rides'
+                      ? 'bg-[var(--green)]/20 border-[var(--green)]/40 text-[var(--green)]'
+                      : 'bg-[var(--bg)]/60 border-[var(--line)] text-[var(--ink)] hover:bg-[var(--bg)]'
+                  }`}
                 >
                   <Car className="w-3.5 h-3.5" />
-                  <span>رفيق الطريق · مشاركة الرحلات</span>
+                  <span>رفيق الطريق</span>
                 </button>
               </div>
             ) : (
@@ -4232,18 +4219,22 @@ export default function App() {
                   )}
                 </button>
 
-                {/* 3. Primary Highlight: Rafiq Al-Tariq Inter-Wilaya Ride Sharing Modal */}
+                {/* 3. Primary Highlight: Rafiq Al-Tariq Inter-Wilaya Ride Sharing (Internal View) */}
                 <button
                   type="button"
                   onClick={() => {
-                    setIsRafiqModalOpen(true);
+                    setView('rides');
                     setIsMobileSidebarOpen(false);
                   }}
-                  className="w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-semibold transition-all cursor-pointer text-[var(--ink)] hover:bg-[var(--bg)] border border-[var(--green)]/30 bg-[var(--green)]/10"
+                  className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-semibold transition-all cursor-pointer border ${
+                    view === 'rides'
+                      ? 'bg-[var(--green)]/20 border-[var(--green)] text-[var(--green)] font-bold shadow-xs'
+                      : 'text-[var(--ink)] hover:bg-[var(--bg)] border-[var(--green)]/30 bg-[var(--green)]/10'
+                  }`}
                 >
                   <div className="flex items-center gap-2.5 min-w-0">
                     <Car className="w-4 h-4 text-[var(--green)] shrink-0" />
-                    <span className="truncate font-bold text-[var(--ink)]">
+                    <span className="truncate font-bold">
                       رفيق الطريق · مشاركة الرحلات
                     </span>
                   </div>
@@ -4529,13 +4520,13 @@ export default function App() {
                 <Menu className="w-5 h-5" />
               </button>
 
-              {/* Unified AI Engine Brand Badge with Static Non-Glowing App Icon */}
+              {/* Clean App Brand Badge: Icon + Name */}
               <div
                 onClick={handleLogoClick}
-                className="flex items-center gap-2 ps-1.5 pe-3 py-1 rounded-full bg-[var(--bg)] border border-[var(--line)] select-none cursor-pointer shrink-0 transition-colors"
+                className="flex items-center gap-2 ps-1.5 pe-3 py-1 rounded-full bg-[var(--bg)] hover:bg-[var(--line)]/30 border border-[var(--line)] select-none cursor-pointer shrink-0 transition-all shadow-2xs"
                 title={t.appName}
               >
-                <div className="w-6 h-6 rounded-lg flex items-center justify-center shrink-0 overflow-hidden bg-[#031752]">
+                <div className="w-6 h-6 rounded-lg flex items-center justify-center shrink-0 overflow-hidden bg-[#031752] shadow-2xs ring-1 ring-[var(--green)]/30">
                   <img
                     src="/icon.svg"
                     alt={t.appName}
@@ -4545,9 +4536,6 @@ export default function App() {
                 </div>
                 <span className="text-xs font-extrabold text-[var(--ink)] tracking-tight whitespace-nowrap">
                   {t.appName}
-                </span>
-                <span className="text-[10px] text-[var(--mute)] hidden sm:inline whitespace-nowrap">
-                  · {t.assistantTitle}
                 </span>
               </div>
 
@@ -4561,30 +4549,11 @@ export default function App() {
                   <span className="truncate font-medium text-[var(--ink)]">{currentActiveSession.title}</span>
                 </div>
               )}
+
             </div>
 
-            {/* Header Right Actions: Rafiq Al-Tariq + Download App + PWA Install + Mind Focus Mode + Language */}
+            {/* Header Right Actions: Mind Focus Mode + Language + Profile */}
             <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
-              <button
-                type="button"
-                onClick={() => setIsRafiqModalOpen(true)}
-                className="flex items-center gap-1.5 h-8 px-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer bg-[var(--green)] hover:opacity-95 text-[var(--on)] shadow-xs"
-                title="رفيق الطريق | تيديكلت AI"
-                aria-label="رفيق الطريق"
-              >
-                <Car className="w-3.5 h-3.5 shrink-0" />
-                <span className="hidden sm:inline">رفيق الطريق</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setIsDownloadModalOpen(true)}
-                className="download-button flex items-center justify-center w-8 h-8 rounded-xl text-xs font-bold transition-all cursor-pointer bg-[#176b52] hover:bg-[#125742] text-white shadow-xs"
-                title="📲 تنزيل التطبيق (APK لأندرويد و iPhone)"
-                aria-label="تنزيل التطبيق"
-              >
-                <span>📲</span>
-              </button>
 
               {!isOnline && (
                 <a
@@ -6681,7 +6650,7 @@ export default function App() {
             cloudNewsError={cloudNewsError}
             onRefreshLiveNews={triggerDailyNewsGathering}
             isRefreshingLiveNews={isGatheringNews}
-            onOpenRafiq={() => setIsRafiqModalOpen(true)}
+            onOpenRafiq={() => setView('rides')}
             onToggleSidebar={() => {
               if (window.innerWidth < 768) {
                 setIsMobileSidebarOpen((prev) => !prev);
@@ -6690,6 +6659,20 @@ export default function App() {
               }
             }}
           />
+        )}
+
+        {/* VIEW: RAFIQ AL-TARIQ / رفيق الطريق (Internal In-App View) */}
+        {view === 'rides' && (
+          <div className="flex-1 flex flex-col w-full h-full min-h-0 overflow-hidden animate-in fade-in">
+            <RafiqAlTariqModal
+              isOpen={true}
+              embedded={true}
+              onClose={() => setView('chat')}
+              onBackToChat={() => setView('chat')}
+              lang={lang}
+              isAdminLoggedIn={isAdminLoggedIn}
+            />
+          </div>
         )}
 
         {/* VIEW: GOOGLE MAPS & TASKS + CLOUD SQL */}

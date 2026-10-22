@@ -31,10 +31,12 @@ export interface RafiqUiRide {
 }
 
 interface RafiqAlTariqModalProps {
-  isOpen: boolean;
-  onClose: () => void;
+  isOpen?: boolean;
+  onClose?: () => void;
   lang?: 'ar' | 'fr' | 'en';
   isAdminLoggedIn?: boolean;
+  embedded?: boolean;
+  onBackToChat?: () => void;
 }
 
 const iso = (d: Date) =>
@@ -119,9 +121,12 @@ const Icon: React.FC<{ name: string }> = ({ name }) => (
 );
 
 export const RafiqAlTariqModal: React.FC<RafiqAlTariqModalProps> = ({
-  isOpen,
+  isOpen = false,
   onClose,
+  lang = 'ar',
   isAdminLoggedIn = false,
+  embedded = false,
+  onBackToChat,
 }) => {
   const ME = 'u0';
   const [drivers, setDrivers] = useState<RafiqDriverUser[]>(INITIAL_DRIVERS);
@@ -261,8 +266,10 @@ export const RafiqAlTariqModal: React.FC<RafiqAlTariqModalProps> = ({
     };
   };
 
+  const isVisible = embedded || Boolean(isOpen);
+
   useEffect(() => {
-    if (!isOpen) return;
+    if (!isVisible) return;
     fetch('/api/rafiq/rides')
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
@@ -271,10 +278,10 @@ export const RafiqAlTariqModal: React.FC<RafiqAlTariqModalProps> = ({
         }
       })
       .catch(() => {});
-  }, [isOpen]);
+  }, [isVisible]);
 
   useEffect(() => {
-    if (!isOpen) return;
+    if (!isVisible) return;
     const handleOutsideClick = (e: MouseEvent) => {
       const target = e.target as HTMLElement | null;
       if (!target) return;
@@ -295,9 +302,9 @@ export const RafiqAlTariqModal: React.FC<RafiqAlTariqModalProps> = ({
       document.removeEventListener('click', handleOutsideClick);
       document.removeEventListener('keydown', handleKeyDown);
     };
-  }, [isOpen]);
+  }, [isVisible]);
 
-  if (!isOpen) return null;
+  if (!isVisible) return null;
 
   const canEditRide = (r: RafiqUiRide) =>
     (r.uid === ME || r.who === 'أنت') && !getDriver(ME).banned;
@@ -652,10 +659,14 @@ export const RafiqAlTariqModal: React.FC<RafiqAlTariqModalProps> = ({
 
   return (
     <div
-      className="fixed inset-0 z-50 overflow-y-auto rafiq-page"
+      className={
+        embedded
+          ? 'flex-1 w-full h-full min-h-0 overflow-y-auto rafiq-page relative flex flex-col bg-[var(--page)] text-[var(--ink)]'
+          : 'fixed inset-0 z-50 overflow-y-auto rafiq-page'
+      }
       dir="rtl"
-      role="dialog"
-      aria-modal="true"
+      role={embedded ? 'region' : 'dialog'}
+      aria-modal={embedded ? undefined : 'true'}
       aria-label="رفيق الطريق | تيديكلت AI"
     >
       {/* SVG Sprite Symbols */}
@@ -778,7 +789,7 @@ export const RafiqAlTariqModal: React.FC<RafiqAlTariqModalProps> = ({
             <span className="mark">
               <Icon name="wheel" />
             </span>
-            رفيق الطريق
+            <span>رفيق الطريق</span>
           </div>
           <button
             className="icon-btn"
@@ -812,11 +823,11 @@ export const RafiqAlTariqModal: React.FC<RafiqAlTariqModalProps> = ({
           <button
             className="icon-btn"
             type="button"
-            onClick={onClose}
-            aria-label="إغلاق"
-            title="العودة إلى المحادثة"
+            onClick={onBackToChat || onClose}
+            aria-label={embedded ? 'العودة إلى المحادثة' : 'إغلاق'}
+            title={embedded ? 'العودة إلى المحادثة الذكية' : 'العودة إلى المحادثة'}
           >
-            <Icon name="x" />
+            {embedded ? <Icon name="arrow" /> : <Icon name="x" />}
           </button>
         </div>
       </header>
