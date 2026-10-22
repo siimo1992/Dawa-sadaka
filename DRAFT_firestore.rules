@@ -1,0 +1,260 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global Default-Deny Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Hardened Global Helpers
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerifiedUser() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isParentUserValid(userId) {
+      return exists(/databases/$(database)/documents/users/$(userId)) &&
+        get(/databases/$(database)/documents/users/$(userId)).data.uid == request.auth.uid;
+    }
+
+    // Entity Validation Blueprints
+    function isValidUserProfile(data) {
+      return data.keys().hasAll(['uid', 'displayName', 'photoURL', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['uid', 'displayName', 'photoURL', 'createdAt', 'updatedAt']) &&
+        data.uid is string && data.uid.size() >= 1 && data.uid.size() <= 128 && data.uid.matches('^[a-zA-Z0-9_\\-]+$') &&
+        data.uid == request.auth.uid &&
+        data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 120 &&
+        data.photoURL is string && data.photoURL.size() >= 0 && data.photoURL.size() <= 1024 &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidChatSession(data) {
+      return data.keys().hasAll([
+          'sessionId',
+          'ownerId',
+          'title',
+          'preview',
+          'lastUserPrompt',
+          'lastAiResponse',
+          'agentId',
+          'messagesCount',
+          'createdAt',
+          'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'sessionId',
+          'ownerId',
+          'title',
+          'preview',
+          'lastUserPrompt',
+          'lastAiResponse',
+          'agentId',
+          'messagesCount',
+          'createdAt',
+          'updatedAt'
+        ]) &&
+        data.sessionId is string && data.sessionId.size() >= 1 && data.sessionId.size() <= 128 && data.sessionId.matches('^[a-zA-Z0-9_\\-]+$') &&
+        data.ownerId is string && data.ownerId.size() >= 1 && data.ownerId.size() <= 128 && data.ownerId.matches('^[a-zA-Z0-9_\\-]+$') &&
+        data.ownerId == request.auth.uid &&
+        data.title is string && data.title.size() >= 1 && data.title.size() <= 200 &&
+        data.preview is string && data.preview.size() >= 0 && data.preview.size() <= 1000 &&
+        data.lastUserPrompt is string && data.lastUserPrompt.size() >= 0 && data.lastUserPrompt.size() <= 2000 &&
+        data.lastAiResponse is string && data.lastAiResponse.size() >= 0 && data.lastAiResponse.size() <= 8000 &&
+        data.agentId is string && data.agentId.size() >= 1 && data.agentId.size() <= 64 && data.agentId.matches('^[a-zA-Z0-9_\\-]+$') &&
+        data.messagesCount is int && data.messagesCount >= 0 && data.messagesCount <= 5000 &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidSavedNewsItem(data) {
+      return data.keys().hasAll([
+          'newsId',
+          'ownerId',
+          'source',
+          'text',
+          'category',
+          'createdAt',
+          'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'newsId',
+          'ownerId',
+          'source',
+          'text',
+          'category',
+          'createdAt',
+          'updatedAt'
+        ]) &&
+        data.newsId is string && data.newsId.size() >= 1 && data.newsId.size() <= 128 && data.newsId.matches('^[a-zA-Z0-9_\\-]+$') &&
+        data.ownerId is string && data.ownerId.size() >= 1 && data.ownerId.size() <= 128 && data.ownerId.matches('^[a-zA-Z0-9_\\-]+$') &&
+        data.ownerId == request.auth.uid &&
+        data.source is string && data.source.size() >= 1 && data.source.size() <= 160 &&
+        data.text is string && data.text.size() >= 1 && data.text.size() <= 4000 &&
+        data.category is string && data.category.size() >= 1 && data.category.size() <= 40 &&
+        data.category in ['general', 'urgent', 'weather', 'roads', 'events', 'jobs'] &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    // 1. User Profiles Collection
+    match /users/{userId} {
+      allow get: if isOwner(userId) && isValidId(userId) && existing().uid == request.auth.uid;
+      allow list: if isOwner(userId) && existing().uid == request.auth.uid;
+
+      allow create: if isVerifiedUser() &&
+        isOwner(userId) &&
+        isValidId(userId) &&
+        isValidUserProfile(incoming()) &&
+        incoming().uid == userId &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+
+      allow update: if isVerifiedUser() &&
+        isValidUserProfile(incoming()) &&
+        isOwner(userId) &&
+        isValidId(userId) &&
+        incoming().uid == existing().uid &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        (
+          incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'photoURL', 'updatedAt']) ||
+          incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'updatedAt']) ||
+          incoming().diff(existing()).affectedKeys().hasOnly(['photoURL', 'updatedAt']) ||
+          incoming().diff(existing()).affectedKeys().hasOnly(['updatedAt'])
+        );
+
+      allow delete: if false;
+
+      // 2. User Chat Sessions Subcollection
+      match /chatSessions/{sessionId} {
+        allow get: if isOwner(userId) &&
+          isValidId(userId) &&
+          isValidId(sessionId) &&
+          existing().ownerId == request.auth.uid &&
+          isParentUserValid(userId);
+
+        allow list: if isOwner(userId) &&
+          existing().ownerId == request.auth.uid;
+
+        allow create: if isVerifiedUser() &&
+          isOwner(userId) &&
+          isValidId(userId) &&
+          isValidId(sessionId) &&
+          isValidChatSession(incoming()) &&
+          incoming().sessionId == sessionId &&
+          incoming().ownerId == userId &&
+          incoming().createdAt == request.time &&
+          incoming().updatedAt == request.time &&
+          isParentUserValid(userId);
+
+        allow update: if isVerifiedUser() &&
+          isValidChatSession(incoming()) &&
+          isOwner(userId) &&
+          isValidId(userId) &&
+          isValidId(sessionId) &&
+          existing().ownerId == request.auth.uid &&
+          incoming().sessionId == existing().sessionId &&
+          incoming().ownerId == existing().ownerId &&
+          incoming().createdAt == existing().createdAt &&
+          incoming().updatedAt == request.time &&
+          isParentUserValid(userId) &&
+          (
+            // Action 1: Rename session title
+            incoming().diff(existing()).affectedKeys().hasOnly(['title', 'updatedAt']) ||
+            // Action 2: Sync new messages in session
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'title',
+              'preview',
+              'lastUserPrompt',
+              'lastAiResponse',
+              'agentId',
+              'messagesCount',
+              'updatedAt'
+            ]) ||
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'preview',
+              'lastUserPrompt',
+              'lastAiResponse',
+              'messagesCount',
+              'updatedAt'
+            ])
+          );
+
+        allow delete: if isVerifiedUser() &&
+          isOwner(userId) &&
+          isValidId(userId) &&
+          isValidId(sessionId) &&
+          existing().ownerId == request.auth.uid &&
+          isParentUserValid(userId);
+      }
+
+      // 3. User Saved News Subcollection
+      match /savedNews/{newsId} {
+        allow get: if isOwner(userId) &&
+          isValidId(userId) &&
+          isValidId(newsId) &&
+          existing().ownerId == request.auth.uid &&
+          isParentUserValid(userId);
+
+        allow list: if isOwner(userId) &&
+          existing().ownerId == request.auth.uid;
+
+        allow create: if isVerifiedUser() &&
+          isOwner(userId) &&
+          isValidId(userId) &&
+          isValidId(newsId) &&
+          isValidSavedNewsItem(incoming()) &&
+          incoming().newsId == newsId &&
+          incoming().ownerId == userId &&
+          incoming().createdAt == request.time &&
+          incoming().updatedAt == request.time &&
+          isParentUserValid(userId);
+
+        allow update: if isVerifiedUser() &&
+          isValidSavedNewsItem(incoming()) &&
+          isOwner(userId) &&
+          isValidId(userId) &&
+          isValidId(newsId) &&
+          existing().ownerId == request.auth.uid &&
+          incoming().newsId == existing().newsId &&
+          incoming().ownerId == existing().ownerId &&
+          incoming().createdAt == existing().createdAt &&
+          incoming().updatedAt == request.time &&
+          isParentUserValid(userId) &&
+          (
+            incoming().diff(existing()).affectedKeys().hasOnly(['text', 'category', 'source', 'updatedAt']) ||
+            incoming().diff(existing()).affectedKeys().hasOnly(['text', 'updatedAt'])
+          );
+
+        allow delete: if isVerifiedUser() &&
+          isOwner(userId) &&
+          isValidId(userId) &&
+          isValidId(newsId) &&
+          existing().ownerId == request.auth.uid &&
+          isParentUserValid(userId);
+      }
+    }
+  }
+}

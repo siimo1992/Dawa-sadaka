@@ -1,0 +1,192 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Basic profile metadata for an authenticated user.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "description": "The authenticated user ID matching request.auth.uid.",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "displayName": {
+          "type": "string",
+          "description": "User display name.",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "photoURL": {
+          "type": "string",
+          "description": "User avatar URL.",
+          "minLength": 0,
+          "maxLength": 1024
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of profile creation."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of profile update."
+        }
+      },
+      "required": ["uid", "displayName", "photoURL", "createdAt", "updatedAt"]
+    },
+    "ChatSession": {
+      "title": "ChatSession",
+      "description": "A user chat session stored in the user's subcollection.",
+      "type": "object",
+      "properties": {
+        "sessionId": {
+          "type": "string",
+          "description": "Unique identifier of the chat session.",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "ownerId": {
+          "type": "string",
+          "description": "UID of the session owner.",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "title": {
+          "type": "string",
+          "description": "Conversation title.",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "preview": {
+          "type": "string",
+          "description": "Latest message preview snippet.",
+          "minLength": 0,
+          "maxLength": 1000
+        },
+        "lastUserPrompt": {
+          "type": "string",
+          "description": "Latest user question in the session.",
+          "minLength": 0,
+          "maxLength": 2000
+        },
+        "lastAiResponse": {
+          "type": "string",
+          "description": "Latest assistant response in the session.",
+          "minLength": 0,
+          "maxLength": 8000
+        },
+        "agentId": {
+          "type": "string",
+          "description": "Active agent identifier for the session.",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "messagesCount": {
+          "type": "number",
+          "description": "Count of messages in the session."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when session was created."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when session was last updated."
+        }
+      },
+      "required": [
+        "sessionId",
+        "ownerId",
+        "title",
+        "preview",
+        "lastUserPrompt",
+        "lastAiResponse",
+        "agentId",
+        "messagesCount",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "SavedNewsItem": {
+      "title": "SavedNewsItem",
+      "description": "A community news item saved by the user.",
+      "type": "object",
+      "properties": {
+        "newsId": {
+          "type": "string",
+          "description": "Unique ID of the saved news item.",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "ownerId": {
+          "type": "string",
+          "description": "UID of the user who saved the news item.",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "source": {
+          "type": "string",
+          "description": "Source name of the news.",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "text": {
+          "type": "string",
+          "description": "Content of the news item.",
+          "minLength": 1,
+          "maxLength": 4000
+        },
+        "category": {
+          "type": "string",
+          "description": "News category.",
+          "enum": ["general", "urgent", "weather", "roads", "events", "jobs"],
+          "minLength": 1,
+          "maxLength": 40
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when saved."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when updated."
+        }
+      },
+      "required": [
+        "newsId",
+        "ownerId",
+        "source",
+        "text",
+        "category",
+        "createdAt",
+        "updatedAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserProfile" },
+      "description": "Stores user profile metadata isolated per user."
+    },
+    "/users/{userId}/chatSessions/{sessionId}": {
+      "schema": { "$ref": "#/entities/ChatSession" },
+      "description": "Stores synced chat sessions belonging to a specific user."
+    },
+    "/users/{userId}/savedNews/{newsId}": {
+      "schema": { "$ref": "#/entities/SavedNewsItem" },
+      "description": "Stores synced local news items belonging to a specific user."
+    }
+  }
+}

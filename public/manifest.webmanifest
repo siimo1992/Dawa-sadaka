@@ -1,0 +1,57 @@
+{
+  "id": "/",
+  "name": "تيديكلت AI",
+  "short_name": "تيديكلت AI",
+  "description": "تيديكلت AI · منصة ذكاء اصطناعي مستقلة وشاملة للمحادثة الذكية والبحث المعرفي وتحليل المستندات والبرمجة · المطور DARTAGNAN MAHMUOD.",
+  "lang": "ar",
+  "dir": "rtl",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#0b1114",
+  "theme_color": "#065f46",
+  "categories": ["utilities", "navigation", "education", "news"],
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/apple-touch-icon.png",
+      "sizes": "180x180",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "نداء طوارئ الصحراء SOS",
+      "short_name": "طوارئ SOS",
+      "description": "فتح نافذة الاستغاثة وإحداثيات GPS وأرقام الطوارئ فوراً",
+      "url": "/?action=sos",
+      "icons": [{ "src": "/icon-192.png", "sizes": "192x192", "type": "image/png" }]
+    },
+    {
+      "name": "حالة طريق RN1 والطقس",
+      "short_name": "طريق RN1",
+      "description": "فحص حالة طريق عين صالح - تمنراست والطقس المباشر",
+      "url": "/?action=rn1",
+      "icons": [{ "src": "/icon-192.png", "sizes": "192x192", "type": "image/png" }]
+    }
+  ]
+}

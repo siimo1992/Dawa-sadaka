@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#065f46" />
+    <title>وضع عدم الاتصال · تيديكلت AI</title>
+    <style>
+      :root {
+        --bg: #0b1114;
+        --card: #131c21;
+        --line: #223038;
+        --ink: #f1f5f9;
+        --mute: #94a3b8;
+        --green: #10b981;
+        --gold: #f59e0b;
+        --danger: #ef4444;
+      }
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+      body {
+        font-family: 'Cairo', 'Tajawal', system-ui, -apple-system, sans-serif;
+        background-color: var(--bg);
+        color: var(--ink);
+        line-height: 1.75;
+        padding: 1.25rem;
+        max-width: 680px;
+        margin: 0 auto;
+      }
+      .header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 1rem 1.25rem;
+        background: var(--card);
+        border: 1px solid var(--line);
+        border-radius: 1rem;
+        margin-bottom: 1rem;
+      }
+      .badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.4rem;
+        padding: 0.25rem 0.75rem;
+        border-radius: 999px;
+        font-size: 0.78rem;
+        font-weight: 700;
+        background: rgba(245, 158, 11, 0.15);
+        color: var(--gold);
+        border: 1px solid rgba(245, 158, 11, 0.35);
+      }
+      .card {
+        background: var(--card);
+        border: 1px solid var(--line);
+        border-radius: 1rem;
+        padding: 1.15rem;
+        margin-bottom: 1rem;
+      }
+      .card h2 {
+        font-size: 1.05rem;
+        margin-bottom: 0.65rem;
+        color: var(--green);
+      }
+      .sos-grid {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 0.65rem;
+        margin-top: 0.5rem;
+      }
+      .call-btn {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        padding: 0.85rem;
+        border-radius: 0.85rem;
+        background: rgba(239, 68, 68, 0.12);
+        border: 1px solid rgba(239, 68, 68, 0.35);
+        color: #fecaca;
+        text-decoration: none;
+        font-weight: 800;
+        font-size: 1rem;
+      }
+      .call-btn span {
+        font-size: 0.78rem;
+        color: var(--mute);
+        font-weight: 600;
+      }
+      ul {
+        padding-right: 1.2rem;
+        font-size: 0.92rem;
+      }
+      li {
+        margin-bottom: 0.45rem;
+      }
+      .retry-btn {
+        width: 100%;
+        padding: 0.85rem;
+        border: none;
+        border-radius: 0.85rem;
+        background: var(--green);
+        color: #052e16;
+        font-weight: 800;
+        font-size: 0.95rem;
+        cursor: pointer;
+        margin-top: 0.5rem;
+      }
+      .gps-box {
+        font-family: monospace;
+        padding: 0.65rem;
+        border-radius: 0.65rem;
+        background: rgba(16, 185, 129, 0.1);
+        border: 1px solid rgba(16, 185, 129, 0.3);
+        margin-top: 0.65rem;
+        font-size: 0.85rem;
+        text-align: center;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="header">
+      <div style="display: flex; align-items: center; gap: 0.75rem;">
+        <img src="/icon.svg" alt="تيديكلت AI" style="width: 44px; height: 44px; border-radius: 12px; object-fit: cover; flex-shrink: 0; border: 1px solid rgba(0, 229, 255, 0.35);" />
+        <div>
+          <h1 style="font-size: 1.15rem; font-weight: 800;">تيديكلت AI</h1>
+          <p style="font-size: 0.8rem; color: var(--mute);">منصة ذكاء اصطناعي مستقلة · المطور DARTAGNAN MAHMUOD</p>
+        </div>
+      </div>
+      <span class="badge">⚡ وضع عدم الاتصال</span>
+    </div>
+
+    <div class="card">
+      <h2>🆘 أرقام الطوارئ والنجدة الفورية (تعمل بدون إنترنت)</h2>
+      <div class="sos-grid">
+        <a class="call-btn" href="tel:14">14 <span>الحماية المدنية</span></a>
+        <a class="call-btn" href="tel:1055">1055 <span>الدرك الوطني</span></a>
+        <a class="call-btn" href="tel:17">17 <span>شرطة النجدة</span></a>
+        <a class="call-btn" href="tel:1548">1548 <span>الأمن الوطني</span></a>
+      </div>
+      <div id="gps-out" class="gps-box">اضغط لتحديد إحداثيات GPS الخاصة بك عبر القمر الصناعي</div>
+      <button class="retry-btn" style="background:#f59e0b; margin-top:0.5rem;" onclick="getOfflineGps()">📍 استخراج إحداثيات GPS الآن</button>
+    </div>
+
+    <div class="card">
+      <h2>🏜️ قواعد النجاة عند التعطل في الصحراء (RN1 والمسالك)</h2>
+      <ul>
+        <li><strong>لا تغادر المركبة أبداً:</strong> المركبة توفر الظل وتسهل رؤيتك من طرف دوريات الإنقاذ بـ 10 أضعاف مقارنة بشخص يسير على الأقدام.</li>
+        <li><strong>تقنين المياه:</strong> اشرب رشفات منتظمة وتجنب الحركة أو المشي تحت الشمس بين 11:00 صباحاً و 17:00 مساءً.</li>
+        <li><strong>إشارة الاستغاثة:</strong> ارفع غطاء المحرك، واستخدم مرآة السيارة لعكس ضوء الشمس نهاراً أو المصابيح ليلاً.</li>
+      </ul>
+    </div>
+
+    <div class="card">
+      <h2>🩺 إسعافات أولية عاجلة (لدغة العقرب وضربة الشمس)</h2>
+      <ul>
+        <li><strong>لدغة العقرب:</strong> هدّئ المصاب تماماً لتقليل انتشار السم، ثبّت الطرف المصاب، ضع كمادة باردة، ولا تقم بجرح أو مص مكان اللدغة. توجه فوراً لأقرب نقطة صحية لأخذ المصل.</li>
+        <li><strong>ضربة الشمس:</strong> انقل المصاب للظل فوراً، بلل جسمه بالماء والتهوية المستمرة، وارفعه قليلاً.</li>
+      </ul>
+    </div>
+
+    <button class="retry-btn" onclick="window.location.reload()">🔄 إعادة المحاولة والاتصال بالتطبيق</button>
+
+    <script>
+      function getOfflineGps() {
+        var box = document.getElementById('gps-out');
+        if (!navigator.geolocation) {
+          box.textContent = 'جهازك لا يدعم GPS المباشر';
+          return;
+        }
+        box.textContent = 'جاري التقاط إشارة الأقمار الصناعية GPS...';
+        navigator.geolocation.getCurrentPosition(
+          function (pos) {
+            var lat = pos.coords.latitude.toFixed(5);
+            var lon = pos.coords.longitude.toFixed(5);
+            var acc = Math.round(pos.coords.accuracy);
+            box.innerHTML = 'الإحداثيات: <strong>' + lat + ', ' + lon + '</strong> (الدقة: ±' + acc + 'م)';
+          },
+          function () {
+            box.textContent = 'تعذر التقاط الإحداثيات، تأكد من تفعيل الموقع (Location) في الهاتف.';
+          },
+          { enableHighAccuracy: true, timeout: 10000 }
+        );
+      }
+    </script>
+  </body>
+</html>

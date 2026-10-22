@@ -1,0 +1,8 @@
+{
+  "name": "Remix منصة الذكاء الاصطناعي | AI Studio Hub",
+  "description": "منصة ذكاء اصطناعي متطورة وشاملة للمحادثة الذكية، تحليل الصور والمستندات، كتابة المحتوى والبرمجة، وتحويل النصوص إلى صوت طبيعي.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
