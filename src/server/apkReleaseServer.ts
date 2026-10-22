@@ -14,16 +14,20 @@ const APK_CONFIG_FILE = path.join(DATA_DIR, 'apk_release_config.json');
 const UPLOADED_APK_PATH = path.join(DATA_DIR, 'tidikelt-ai-release.apk');
 const PUBLIC_APK_PATH = path.join(PUBLIC_DOWNLOADS_DIR, 'tidikelt-ai-release.apk');
 
+export type ApkReleaseMode = 'android_webapk' | 'external_url' | 'uploaded_file';
+
 export interface ApkReleaseConfig {
-  mode: 'external_url' | 'uploaded_file';
+  mode: ApkReleaseMode;
   externalUrl: string;
   normalizedDownloadUrl: string;
   iosAppStoreUrl: string;
   version: string;
   fileSizeLabel: string;
   fileName: string;
+  originalUploadedName?: string;
   releaseNotes: string;
   updatedAt: number;
+  lastResetAt?: number;
   hasCustomUploadedApk: boolean;
   uploadedFileSizeBytes: number;
 }
@@ -41,7 +45,7 @@ function ensureDirectories() {
 }
 
 /**
- * Converts common cloud sharing URLs (like Google Drive or Dropbox) into direct download URLs
+ * Converts common cloud sharing URLs (like Google Drive, Dropbox, GitHub blob) into direct download URLs
  */
 export function normalizeDirectDownloadUrl(rawUrl: string): string {
   const trimmed = (rawUrl || '').trim();
@@ -64,6 +68,11 @@ export function normalizeDirectDownloadUrl(rawUrl: string): string {
     if (parsed.hostname.includes('dropbox.com')) {
       parsed.searchParams.set('dl', '1');
       return parsed.toString();
+    }
+
+    // 3. GitHub blob URL -> raw URL
+    if (parsed.hostname === 'github.com' && parsed.pathname.includes('/blob/')) {
+      return `${trimmed}${trimmed.includes('?') ? '&' : '?'}raw=true`;
     }
 
     return trimmed;
@@ -127,23 +136,46 @@ function getActiveApkFilePath(): { path: string | null; isValid: boolean; sizeBy
   return { path: null, isValid: false, sizeBytes: 0 };
 }
 
-function loadApkConfig(): ApkReleaseConfig {
-  ensureDirectories();
-  const activeFile = getActiveApkFilePath();
+function deleteAllStoredApkFiles(): { deletedFiles: string[] } {
+  const deletedFiles: string[] = [];
+  for (const filePath of [UPLOADED_APK_PATH, PUBLIC_APK_PATH, APK_CONFIG_FILE]) {
+    try {
+      if (fs.existsSync(filePath)) {
+        fs.unlinkSync(filePath);
+        deletedFiles.push(path.basename(filePath));
+      }
+    } catch (err) {
+      console.warn('Failed to delete APK artifact:', filePath, err);
+    }
+  }
+  return { deletedFiles };
+}
 
-  const defaultConfig: ApkReleaseConfig = {
-    mode: activeFile.isValid ? 'uploaded_file' : 'external_url',
+function buildDefaultApkConfig(lastResetAt?: number): ApkReleaseConfig {
+  const activeFile = getActiveApkFilePath();
+  const now = Date.now();
+  return {
+    mode: activeFile.isValid ? 'uploaded_file' : 'android_webapk',
     externalUrl: '',
     normalizedDownloadUrl: '',
     iosAppStoreUrl: '',
     version: '2.5.0',
     fileSizeLabel: activeFile.isValid ? formatBytesLabel(activeFile.sizeBytes) : '18.4 MB',
     fileName: 'tidikelt-ai-release.apk',
-    releaseNotes: 'النسخة الرسمية لمنصة تيديكلت AI — دعم الدردشة الذكية، رفيق الطريق، ومحليات عين صالح.',
-    updatedAt: Date.now(),
+    originalUploadedName: '',
+    releaseNotes:
+      'النسخة الرسمية لمنصة تيديكلت AI على أندرويد — دعم المحادثة الذكية، رفيق الطريق، ومستجدات عين صالح.',
+    updatedAt: now,
+    lastResetAt: lastResetAt || now,
     hasCustomUploadedApk: activeFile.isValid,
     uploadedFileSizeBytes: activeFile.sizeBytes,
   };
+}
+
+function loadApkConfig(): ApkReleaseConfig {
+  ensureDirectories();
+  const activeFile = getActiveApkFilePath();
+  const defaultConfig = buildDefaultApkConfig();
 
   try {
     if (fs.existsSync(APK_CONFIG_FILE)) {
@@ -152,17 +184,31 @@ function loadApkConfig(): ApkReleaseConfig {
       const externalUrl = typeof parsed.externalUrl === 'string' ? parsed.externalUrl.trim() : '';
       const normalizedDownloadUrl = normalizeDirectDownloadUrl(externalUrl);
 
+      let resolvedMode: ApkReleaseMode = defaultConfig.mode;
+      if (
+        parsed.mode === 'uploaded_file' ||
+        parsed.mode === 'external_url' ||
+        parsed.mode === 'android_webapk'
+      ) {
+        resolvedMode = parsed.mode;
+      }
+
+      // If config says uploaded_file but the file was deleted, automatically fall back cleanly
+      if (resolvedMode === 'uploaded_file' && !activeFile.isValid) {
+        resolvedMode = normalizedDownloadUrl ? 'external_url' : 'android_webapk';
+      }
+
       return {
-        mode:
-          parsed.mode === 'uploaded_file' || parsed.mode === 'external_url'
-            ? parsed.mode
-            : defaultConfig.mode,
+        mode: resolvedMode,
         externalUrl,
         normalizedDownloadUrl,
         iosAppStoreUrl: typeof parsed.iosAppStoreUrl === 'string' ? parsed.iosAppStoreUrl.trim() : '',
-        version: typeof parsed.version === 'string' && parsed.version.trim() ? parsed.version.trim() : defaultConfig.version,
+        version:
+          typeof parsed.version === 'string' && parsed.version.trim()
+            ? parsed.version.trim()
+            : defaultConfig.version,
         fileSizeLabel:
-          parsed.mode === 'uploaded_file' && activeFile.isValid
+          resolvedMode === 'uploaded_file' && activeFile.isValid
             ? formatBytesLabel(activeFile.sizeBytes)
             : typeof parsed.fileSizeLabel === 'string' && parsed.fileSizeLabel.trim()
             ? parsed.fileSizeLabel.trim()
@@ -171,11 +217,14 @@ function loadApkConfig(): ApkReleaseConfig {
           typeof parsed.fileName === 'string' && parsed.fileName.trim().endsWith('.apk')
             ? parsed.fileName.trim()
             : 'tidikelt-ai-release.apk',
+        originalUploadedName:
+          typeof parsed.originalUploadedName === 'string' ? parsed.originalUploadedName : '',
         releaseNotes:
           typeof parsed.releaseNotes === 'string' && parsed.releaseNotes.trim()
             ? parsed.releaseNotes.trim()
             : defaultConfig.releaseNotes,
         updatedAt: typeof parsed.updatedAt === 'number' ? parsed.updatedAt : defaultConfig.updatedAt,
+        lastResetAt: typeof parsed.lastResetAt === 'number' ? parsed.lastResetAt : undefined,
         hasCustomUploadedApk: activeFile.isValid,
         uploadedFileSizeBytes: activeFile.sizeBytes,
       };
@@ -195,17 +244,29 @@ function saveApkConfig(config: Partial<ApkReleaseConfig>): ApkReleaseConfig {
   const normalizedDownloadUrl = normalizeDirectDownloadUrl(externalUrl);
   const activeFile = getActiveApkFilePath();
 
+  const targetMode: ApkReleaseMode =
+    config.mode === 'uploaded_file' ||
+    config.mode === 'external_url' ||
+    config.mode === 'android_webapk'
+      ? config.mode
+      : current.mode;
+
   const updated: ApkReleaseConfig = {
     ...current,
     ...config,
+    mode: targetMode,
     externalUrl,
     normalizedDownloadUrl,
     hasCustomUploadedApk: activeFile.isValid,
     uploadedFileSizeBytes: activeFile.sizeBytes,
     fileSizeLabel:
-      (config.mode || current.mode) === 'uploaded_file' && activeFile.isValid
+      targetMode === 'uploaded_file' && activeFile.isValid
         ? formatBytesLabel(activeFile.sizeBytes)
-        : (config.fileSizeLabel || current.fileSizeLabel).trim(),
+        : (config.fileSizeLabel || current.fileSizeLabel || '18.4 MB').trim(),
+    fileName:
+      typeof config.fileName === 'string' && config.fileName.trim().endsWith('.apk')
+        ? config.fileName.trim()
+        : current.fileName || 'tidikelt-ai-release.apk',
     updatedAt: Date.now(),
   };
 
@@ -269,12 +330,14 @@ function streamApkFileWithRange(req: Request, res: Response, filePath: string, d
 export function registerApkReleaseRoutes(app: Express) {
   ensureDirectories();
 
-  // Remove the old 41-byte dummy text file if it exists so it never corrupts downloads
+  // Remove any corrupt/small file if it exists so it never corrupts downloads
   try {
-    if (fs.existsSync(PUBLIC_APK_PATH)) {
-      const check = inspectApkFile(PUBLIC_APK_PATH);
-      if (!check.isValid && check.sizeBytes < 512) {
-        fs.unlinkSync(PUBLIC_APK_PATH);
+    for (const candidate of [PUBLIC_APK_PATH, UPLOADED_APK_PATH]) {
+      if (fs.existsSync(candidate)) {
+        const check = inspectApkFile(candidate);
+        if (!check.isValid) {
+          fs.unlinkSync(candidate);
+        }
       }
     }
   } catch {}
@@ -290,13 +353,20 @@ export function registerApkReleaseRoutes(app: Express) {
   app.post('/api/apk/config', (req: Request, res: Response) => {
     try {
       const body = req.body || {};
+      const requestedMode: ApkReleaseMode =
+        body.mode === 'uploaded_file'
+          ? 'uploaded_file'
+          : body.mode === 'external_url'
+          ? 'external_url'
+          : 'android_webapk';
+
       const updated = saveApkConfig({
-        mode: body.mode === 'uploaded_file' ? 'uploaded_file' : 'external_url',
+        mode: requestedMode,
         externalUrl: typeof body.externalUrl === 'string' ? body.externalUrl : undefined,
         iosAppStoreUrl: typeof body.iosAppStoreUrl === 'string' ? body.iosAppStoreUrl : undefined,
         version: typeof body.version === 'string' ? body.version : undefined,
         fileSizeLabel: typeof body.fileSizeLabel === 'string' ? body.fileSizeLabel : undefined,
-        fileName: typeof body.fileName === 'string' ? body.fileName : undefined,
+        fileName: typeof body.fileName === 'string' ? body.fileName : 'tidikelt-ai-release.apk',
         releaseNotes: typeof body.releaseNotes === 'string' ? body.releaseNotes : undefined,
       });
       return res.json({ ok: true, config: updated });
@@ -305,7 +375,48 @@ export function registerApkReleaseRoutes(app: Express) {
     }
   });
 
-  // 3. Upload a real binary .apk file directly from Owner / Admin panel
+  // 3. Delete old APK files & Reset configuration from scratch on Android
+  const handleResetApk = (req: Request, res: Response) => {
+    try {
+      const { deletedFiles } = deleteAllStoredApkFiles();
+      const body = req.body || {};
+      const now = Date.now();
+
+      const freshDefault = buildDefaultApkConfig(now);
+      const reassignedConfig = saveApkConfig({
+        ...freshDefault,
+        mode:
+          body.mode === 'external_url' && body.externalUrl
+            ? 'external_url'
+            : 'android_webapk',
+        externalUrl: typeof body.externalUrl === 'string' ? body.externalUrl.trim() : '',
+        version: typeof body.version === 'string' && body.version.trim() ? body.version.trim() : '2.5.0',
+        fileName: 'tidikelt-ai-release.apk',
+        originalUploadedName: '',
+        fileSizeLabel: '18.4 MB',
+        lastResetAt: now,
+      });
+
+      res.setHeader('Cache-Control', 'no-store');
+      return res.json({
+        ok: true,
+        deletedFiles,
+        message:
+          'تم حذف ملف APK القديم وإعادة ضبط وتعيين حزمة تيديكلت AI للأندرويد من جديد بنجاح.',
+        config: reassignedConfig,
+      });
+    } catch (err: any) {
+      console.error('APK reset error:', err);
+      return res.status(500).json({
+        error: err?.message || 'حدث خطأ أثناء حذف وإعادة ضبط ملف APK.',
+      });
+    }
+  };
+
+  app.post('/api/apk/reset', handleResetApk);
+  app.delete('/api/apk/reset', handleResetApk);
+
+  // 4. Upload and assign a new binary .apk file directly from Android / PC
   app.post(
     '/api/apk/upload',
     express.raw({ type: '*/*', limit: '250mb' }),
@@ -331,45 +442,57 @@ export function registerApkReleaseRoutes(app: Express) {
           });
         }
 
+        // First wipe any previous APK files before writing the newly assigned one
+        try {
+          if (fs.existsSync(UPLOADED_APK_PATH)) fs.unlinkSync(UPLOADED_APK_PATH);
+          if (fs.existsSync(PUBLIC_APK_PATH)) fs.unlinkSync(PUBLIC_APK_PATH);
+        } catch {}
+
         ensureDirectories();
         fs.writeFileSync(UPLOADED_APK_PATH, buffer);
         try {
           fs.writeFileSync(PUBLIC_APK_PATH, buffer);
         } catch {}
 
-        const requestedFileName =
+        const rawHeaderName =
           typeof req.headers['x-apk-filename'] === 'string'
             ? decodeURIComponent(req.headers['x-apk-filename'])
             : 'tidikelt-ai-release.apk';
+        const keepOfficialFileName = req.headers['x-apk-keep-official-name'] !== 'false';
         const requestedVersion =
           typeof req.headers['x-apk-version'] === 'string'
             ? decodeURIComponent(req.headers['x-apk-version'])
             : undefined;
 
+        const assignedFileName = keepOfficialFileName
+          ? 'tidikelt-ai-release.apk'
+          : rawHeaderName.endsWith('.apk')
+          ? rawHeaderName
+          : 'tidikelt-ai-release.apk';
+
         const updated = saveApkConfig({
           mode: 'uploaded_file',
-          fileName: requestedFileName.endsWith('.apk')
-            ? requestedFileName
-            : 'tidikelt-ai-release.apk',
+          fileName: assignedFileName,
+          originalUploadedName: rawHeaderName,
           version: requestedVersion || undefined,
           fileSizeLabel: formatBytesLabel(buffer.length),
         });
 
         return res.json({
           ok: true,
-          message: `تم رفع واعتماد حزمة APK بنجاح (${formatBytesLabel(buffer.length)}).`,
+          message: `تم حذف النسخة السابقة وتعيين حزمة APK الجديدة (${formatBytesLabel(buffer.length)}) بنجاح باسم ${assignedFileName}.`,
           config: updated,
         });
       } catch (err: any) {
         console.error('APK upload error:', err);
         return res.status(500).json({
-          error: err?.message || 'حدث خطأ أثناء حفظ ملف APK على الخادم.',
+          error: err?.message || 'حدث خطأ أثناء حفظ وتعيين ملف APK على الخادم.',
         });
       }
     }
   );
 
-  // 4. Unified APK download handler (supports both /api/apk/download and /downloads/tidikelt-ai-release.apk)
+  // 5. Unified APK download handler (supports both /api/apk/download and /downloads/tidikelt-ai-release.apk)
   const handleApkDownload = (req: Request, res: Response) => {
     const config = loadApkConfig();
     const forceLocal = req.query.source === 'local';
@@ -382,7 +505,7 @@ export function registerApkReleaseRoutes(app: Express) {
     // Priority 2: If a valid uploaded APK file exists on disk, stream it with full headers & byte ranges
     const activeFile = getActiveApkFilePath();
     if (activeFile.isValid && activeFile.path) {
-      return streamApkFileWithRange(req, res, activeFile.path, config.fileName);
+      return streamApkFileWithRange(req, res, activeFile.path, config.fileName || 'tidikelt-ai-release.apk');
     }
 
     // Priority 3: Fallback if externalUrl exists even if mode was set to uploaded_file
@@ -390,11 +513,12 @@ export function registerApkReleaseRoutes(app: Express) {
       return res.redirect(302, config.normalizedDownloadUrl);
     }
 
-    // If neither external URL nor uploaded APK is configured yet, return clear JSON/HTML status instead of a corrupt 41-byte APK
+    // If neither external URL nor uploaded APK is configured, return clear JSON status
     return res.status(404).json({
       error: 'APK_NOT_CONFIGURED',
+      mode: config.mode,
       message:
-        'لم يتم ربط ملف APK النهائي بعد. يرجى من المالك إضافة رابط التحميل المباشر أو رفع ملف APK من نافذة إعدادات التحميل، أو استخدام التثبيت الفوري المباشر (PWA).',
+        'تمت إعادة ضبط ملف APK بنجاح. يمكنك الآن تعيين ملف APK جديد من جهازك أو التثبيت الفوري المباشر على أندرويد.',
     });
   };
 

@@ -1578,6 +1578,118 @@ export default function App() {
     }
   });
 
+  // Facebook-Style Notification Bell & Dropdown State
+  const notifMenuRef = useRef<HTMLDivElement | null>(null);
+  const [isNotifMenuOpen, setIsNotifMenuOpen] = useState(false);
+  const [notifFilterTab, setNotifFilterTab] = useState<'all' | 'unread'>('all');
+  const [readNotifIds, setReadNotifIds] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem('ain_salah_read_notif_ids');
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  const allNotificationsList = useMemo(() => {
+    const list: AppNotification[] = [];
+
+    // 1. Weather alert if active
+    if (weatherAlert.active && !isAlertDismissed) {
+      list.push({
+        id: `weather-live-${weatherAlert.timestamp || 'active'}`,
+        type: 'weather',
+        title: weatherAlert.title,
+        message: weatherAlert.message,
+        source: weatherAlert.source || 'الديوان الوطني للأرصاد الجوية',
+        severity: weatherAlert.severity,
+        timestamp: weatherAlert.timestamp || Date.now(),
+        actionLabel: 'تفاصيل التنبيه في الأخبار',
+        onAction: () => setView('news'),
+      });
+    }
+
+    // 2. Notification history items
+    notificationHistory.forEach((n) => {
+      if (!list.some((existing) => existing.id === n.id)) {
+        list.push(n);
+      }
+    });
+
+    // 3. Fallback approved verified news if empty
+    if (list.length === 0) {
+      const approved = news.filter((item) => item.status === 'approved').slice(0, 3);
+      approved.forEach((item) => {
+        const cat = getCategoryDetails(item.category);
+        list.push({
+          id: `news-item-${item.id}`,
+          type: 'news',
+          title: `خبر موثق: ${item.s}`,
+          message: item.t,
+          categoryName: cat.name,
+          categoryEmoji: cat.emoji,
+          timestamp: item.timestamp,
+          isVerified: true,
+          actionLabel: 'الانتقال إلى الأخبار',
+          onAction: () => setView('news'),
+        });
+      });
+    }
+
+    return list.sort((a, b) => b.timestamp - a.timestamp);
+  }, [weatherAlert, isAlertDismissed, notificationHistory, news]);
+
+  const unreadNotifs = useMemo(() => {
+    const readSet = new Set(readNotifIds);
+    return allNotificationsList.filter((n) => !readSet.has(n.id));
+  }, [allNotificationsList, readNotifIds]);
+
+  const unreadCount = unreadNotifs.length;
+
+  const displayedNotifs = useMemo(() => {
+    if (notifFilterTab === 'unread') {
+      return unreadNotifs;
+    }
+    return allNotificationsList;
+  }, [notifFilterTab, unreadNotifs, allNotificationsList]);
+
+  const markAllNotifsAsRead = () => {
+    const allIds = Array.from(new Set([...readNotifIds, ...allNotificationsList.map((n) => n.id)]));
+    setReadNotifIds(allIds);
+    try {
+      localStorage.setItem('ain_salah_read_notif_ids', JSON.stringify(allIds));
+    } catch {}
+  };
+
+  const markSingleNotifAsRead = (id: string) => {
+    if (readNotifIds.includes(id)) return;
+    const next = [...readNotifIds, id];
+    setReadNotifIds(next);
+    try {
+      localStorage.setItem('ain_salah_read_notif_ids', JSON.stringify(next));
+    } catch {}
+  };
+
+  const handleClearNotifHistory = () => {
+    clearNotificationHistory();
+    const allIds = allNotificationsList.map((n) => n.id);
+    setReadNotifIds(allIds);
+    try {
+      localStorage.setItem('ain_salah_read_notif_ids', JSON.stringify(allIds));
+    } catch {}
+  };
+
+  const formatNotifTime = (ts: number) => {
+    const diff = Math.max(0, Date.now() - ts);
+    const mins = Math.floor(diff / 60000);
+    if (mins < 1) return 'الآن';
+    if (mins < 60) return `منذ ${mins} د`;
+    const hours = Math.floor(mins / 60);
+    if (hours < 24) return `منذ ${hours} س`;
+    const days = Math.floor(hours / 24);
+    return `منذ ${days} ي`;
+  };
+
   // Sync global notification block state from server for all visitors
   useEffect(() => {
     let isMounted = true;
@@ -2519,21 +2631,28 @@ export default function App() {
           ];
 
           const firstSlide = briefSlides[0];
-          timer = setTimeout(() => {
-            pushInAppNotification({
-              type: 'comprehensive_brief',
-              title: hasWeather
-                ? weatherAlert.title
-                : `موجز الأخبار الموثقة: ${firstSlide?.source || 'تديكلت'}`,
-              message: firstSlide?.text || '',
-              severity: hasWeather ? weatherAlert.severity : 'info',
-              isVerified: true,
-              verifiedItems: briefSlides,
-              duration: 12000,
-              actionLabel: 'تفاصيل التنبيه والأخبار الموثقة',
-              onAction: () => setView('news'),
-            });
-          }, 1200);
+          const briefNotif: AppNotification = {
+            id: `brief-${Date.now()}`,
+            type: 'comprehensive_brief',
+            title: hasWeather
+              ? weatherAlert.title
+              : `موجز الأخبار الموثقة: ${firstSlide?.source || 'تديكلت'}`,
+            message: firstSlide?.text || '',
+            severity: hasWeather ? weatherAlert.severity : 'info',
+            isVerified: true,
+            verifiedItems: briefSlides,
+            duration: 12000,
+            timestamp: Date.now(),
+            actionLabel: 'تفاصيل التنبيه والأخبار الموثقة',
+            onAction: () => setView('news'),
+          };
+
+          // Quietly register into notification list without bursting an intrusive toast on entrance
+          setNotificationHistory((prev) => {
+            const exists = prev.some((p) => p.type === 'comprehensive_brief');
+            if (exists) return prev;
+            return [briefNotif, ...prev].slice(0, 30);
+          });
         }
       });
 
@@ -2566,7 +2685,7 @@ export default function App() {
     }
   }, [inputText]);
 
-  // Click outside to close plus menu and agent selector
+  // Click outside to close plus menu, agent selector, and Facebook-style notifications menu
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
       if (plusMenuRef.current && !plusMenuRef.current.contains(event.target as Node)) {
@@ -2575,14 +2694,17 @@ export default function App() {
       if (agentSelectorRef.current && !agentSelectorRef.current.contains(event.target as Node)) {
         setIsAgentSelectorOpen(false);
       }
+      if (notifMenuRef.current && !notifMenuRef.current.contains(event.target as Node)) {
+        setIsNotifMenuOpen(false);
+      }
     }
-    if (isPlusMenuOpen || isAgentSelectorOpen) {
+    if (isPlusMenuOpen || isAgentSelectorOpen || isNotifMenuOpen) {
       document.addEventListener('mousedown', handleClickOutside);
     }
     return () => {
       document.removeEventListener('mousedown', handleClickOutside);
     };
-  }, [isPlusMenuOpen, isAgentSelectorOpen]);
+  }, [isPlusMenuOpen, isAgentSelectorOpen, isNotifMenuOpen]);
 
   const toggleTheme = () => {
     setTheme((t) => (t === 'light' ? 'dark' : 'light'));
@@ -4497,7 +4619,30 @@ export default function App() {
                 </button>
               )}
 
-              <div className="hidden sm:flex items-center gap-0.5 bg-[var(--bg)] border border-[var(--line)] rounded-xl p-0.5 text-[11px] font-bold shadow-2xs">
+              {/* Language Switcher: Mobile Toggle + Desktop Full Pill (استبدل اللغة) */}
+              <button
+                type="button"
+                onClick={() => {
+                  if (lang === 'ar') setLang('fr');
+                  else if (lang === 'fr') setLang('en');
+                  else setLang('ar');
+                }}
+                className="flex sm:hidden items-center gap-1 h-8 px-2 rounded-xl bg-[var(--bg)] hover:bg-[var(--line)]/40 border border-[var(--line)] text-xs font-bold text-[var(--ink)] cursor-pointer transition-colors shadow-2xs"
+                title="استبدل اللغة"
+                aria-label="استبدل اللغة"
+              >
+                <Globe className="w-3.5 h-3.5 text-[var(--mute)]" />
+                <span className="uppercase text-[11px] font-mono">{lang === 'ar' ? 'dz' : lang}</span>
+              </button>
+
+              <div
+                className="hidden sm:flex items-center gap-0.5 bg-[var(--bg)] border border-[var(--line)] rounded-xl p-0.5 text-[11px] font-bold shadow-2xs"
+                title="استبدل اللغة"
+                aria-label="استبدل اللغة"
+              >
+                <div className="ps-1.5 pe-1 text-[var(--mute)] flex items-center" title="استبدل اللغة">
+                  <Globe className="w-3.5 h-3.5" />
+                </div>
                 <button
                   type="button"
                   onClick={() => setLang('ar')}
@@ -4506,7 +4651,7 @@ export default function App() {
                       ? 'bg-[var(--green)] text-white shadow-xs'
                       : 'text-[var(--mute)] hover:text-[var(--ink)]'
                   }`}
-                  title="DZ"
+                  title="العربية (DZ) - استبدل اللغة"
                 >
                   dz
                 </button>
@@ -4518,7 +4663,7 @@ export default function App() {
                       ? 'bg-[var(--green)] text-white shadow-xs'
                       : 'text-[var(--mute)] hover:text-[var(--ink)]'
                   }`}
-                  title="EN"
+                  title="English (EN) - Switch Language"
                 >
                   en
                 </button>
@@ -4530,10 +4675,232 @@ export default function App() {
                       ? 'bg-[var(--green)] text-white shadow-xs'
                       : 'text-[var(--mute)] hover:text-[var(--ink)]'
                   }`}
-                  title="FR"
+                  title="Français (FR) - Changer de langue"
                 >
                   fr
                 </button>
+              </div>
+
+              {/* Facebook-Style Notification Bell Icon & Dropdown Menu (جنب ايقونة استبدل اللغة في شريط اعلى) */}
+              <div className="relative" ref={notifMenuRef}>
+                <button
+                  type="button"
+                  onClick={() => setIsNotifMenuOpen((prev) => !prev)}
+                  className={`relative flex items-center justify-center w-8 h-8 rounded-xl sm:rounded-full transition-all cursor-pointer ${
+                    isNotifMenuOpen
+                      ? 'bg-[var(--green)]/15 border-[var(--green)] text-[var(--green)] ring-2 ring-[var(--green)]/20 shadow-xs'
+                      : 'bg-[var(--bg)] hover:bg-[var(--line)]/40 border border-[var(--line)] text-[var(--ink)] hover:text-[var(--green)] shadow-2xs'
+                  }`}
+                  title={lang === 'ar' ? 'الإشعارات والتنبيهات (مثل فيسبوك)' : 'Notifications'}
+                  aria-label="الإشعارات والتنبيهات"
+                  aria-expanded={isNotifMenuOpen}
+                >
+                  <Bell className="w-4 h-4 shrink-0" />
+                  {unreadCount > 0 && (
+                    <span className="absolute -top-1 -end-1 min-w-[18px] h-[18px] px-1 bg-rose-600 text-white text-[10px] font-black rounded-full flex items-center justify-center shadow-xs animate-in zoom-in-50 leading-none">
+                      {unreadCount > 9 ? '9+' : unreadCount}
+                    </span>
+                  )}
+                </button>
+
+                {/* Facebook-Style Dropdown Menu */}
+                {isNotifMenuOpen && (
+                  <div
+                    className="absolute top-full end-0 mt-2 w-[calc(100vw-28px)] sm:w-96 max-w-sm rounded-2xl bg-[var(--card)] border border-[var(--line)] shadow-2xl z-50 overflow-hidden animate-in fade-in slide-in-from-top-2 duration-150"
+                    dir={lang === 'ar' ? 'rtl' : 'ltr'}
+                  >
+                    {/* Header */}
+                    <div className="p-3.5 pb-2.5 border-b border-[var(--line)]/70 bg-[var(--card)] flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <h3 className="text-sm font-extrabold text-[var(--ink)] m-0">
+                          {lang === 'ar' ? 'الإشعارات' : lang === 'fr' ? 'Notifications' : 'Notifications'}
+                        </h3>
+                        {unreadCount > 0 && (
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-rose-500/15 text-rose-600 dark:text-rose-400 border border-rose-500/25">
+                            {unreadCount} {lang === 'ar' ? 'جديدة' : 'new'}
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="flex items-center gap-1">
+                        {unreadCount > 0 && (
+                          <button
+                            type="button"
+                            onClick={markAllNotifsAsRead}
+                            className="text-[11px] font-bold text-[var(--green)] hover:underline flex items-center gap-1 px-2 py-1 rounded-lg hover:bg-[var(--green)]/10 transition-colors cursor-pointer"
+                            title="تحديد الكل كمقروء"
+                          >
+                            <Check className="w-3.5 h-3.5" />
+                            <span>{lang === 'ar' ? 'تحديد الكل كمقروء' : 'Mark all read'}</span>
+                          </button>
+                        )}
+
+                        {allNotificationsList.length > 0 && (
+                          <button
+                            type="button"
+                            onClick={handleClearNotifHistory}
+                            className="text-[11px] font-semibold text-[var(--mute)] hover:text-rose-500 p-1.5 rounded-lg hover:bg-rose-500/10 transition-colors cursor-pointer"
+                            title="مسح الإشعارات"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Filter Tabs (Like Facebook: الكل / غير مقروءة) */}
+                    <div className="px-3 py-1.5 border-b border-[var(--line)]/50 bg-[var(--bg)]/40 flex items-center gap-1 text-xs">
+                      <button
+                        type="button"
+                        onClick={() => setNotifFilterTab('all')}
+                        className={`px-3 py-1 rounded-full text-xs font-bold transition-all cursor-pointer ${
+                          notifFilterTab === 'all'
+                            ? 'bg-[var(--green)] text-white shadow-2xs'
+                            : 'text-[var(--mute)] hover:text-[var(--ink)]'
+                        }`}
+                      >
+                        {lang === 'ar' ? 'الكل' : 'All'} ({allNotificationsList.length})
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setNotifFilterTab('unread')}
+                        className={`px-3 py-1 rounded-full text-xs font-bold transition-all cursor-pointer flex items-center gap-1 ${
+                          notifFilterTab === 'unread'
+                            ? 'bg-[var(--green)] text-white shadow-2xs'
+                            : 'text-[var(--mute)] hover:text-[var(--ink)]'
+                        }`}
+                      >
+                        <span>{lang === 'ar' ? 'غير مقروءة' : 'Unread'}</span>
+                        {unreadCount > 0 && (
+                          <span className="w-4 h-4 rounded-full bg-rose-500 text-white text-[9px] flex items-center justify-center font-bold">
+                            {unreadCount}
+                          </span>
+                        )}
+                      </button>
+                    </div>
+
+                    {/* Notification Items List */}
+                    <div className="max-h-[380px] overflow-y-auto divide-y divide-[var(--line)]/40">
+                      {displayedNotifs.length === 0 ? (
+                        <div className="py-8 px-4 text-center space-y-2">
+                          <div className="w-12 h-12 rounded-full bg-[var(--green)]/10 text-[var(--green)] flex items-center justify-center mx-auto">
+                            <CheckCircle2 className="w-6 h-6" />
+                          </div>
+                          <p className="text-xs font-bold text-[var(--ink)] m-0">
+                            {notifFilterTab === 'unread'
+                              ? lang === 'ar'
+                                ? 'لا توجد إشعارات غير مقروءة'
+                                : 'No unread notifications'
+                              : lang === 'ar'
+                              ? 'لا توجد إشعارات حالياً'
+                              : 'No notifications'}
+                          </p>
+                          <p className="text-[11px] text-[var(--mute)] m-0 max-w-xs mx-auto leading-relaxed">
+                            {lang === 'ar'
+                              ? 'ستصلك هنا كافة تنبيهات الطقس واليقظة والأخبار الموثقة الخاصة بعين صالح وتديكلت.'
+                              : 'Live alerts and verified community news will appear here.'}
+                          </p>
+                        </div>
+                      ) : (
+                        displayedNotifs.map((n) => {
+                          const isUnread = !readNotifIds.includes(n.id);
+
+                          return (
+                            <div
+                              key={n.id}
+                              onClick={() => {
+                                markSingleNotifAsRead(n.id);
+                                if (n.onAction) {
+                                  n.onAction();
+                                  setIsNotifMenuOpen(false);
+                                }
+                              }}
+                              className={`p-3 flex items-start gap-3 hover:bg-[var(--bg)] transition-colors cursor-pointer group relative ${
+                                isUnread ? 'bg-[var(--green)]/[0.04]' : ''
+                              }`}
+                            >
+                              {/* Icon Badge */}
+                              <div className="shrink-0 mt-0.5">
+                                {n.type === 'weather' ? (
+                                  <div
+                                    className={`w-9 h-9 rounded-full flex items-center justify-center ${
+                                      n.severity === 'danger'
+                                        ? 'bg-rose-500/15 text-rose-500'
+                                        : 'bg-amber-500/15 text-amber-500'
+                                    }`}
+                                  >
+                                    {n.severity === 'danger' ? (
+                                      <Flame className="w-4 h-4 animate-pulse" />
+                                    ) : (
+                                      <Wind className="w-4 h-4 animate-pulse" />
+                                    )}
+                                  </div>
+                                ) : n.type === 'comprehensive_brief' ? (
+                                  <div className="w-9 h-9 rounded-full bg-emerald-500/15 text-emerald-600 flex items-center justify-center">
+                                    <Sparkles className="w-4 h-4" />
+                                  </div>
+                                ) : (
+                                  <div className="w-9 h-9 rounded-full bg-[var(--green)]/15 text-[var(--green)] flex items-center justify-center font-bold text-sm">
+                                    {n.categoryEmoji || '📰'}
+                                  </div>
+                                )}
+                              </div>
+
+                              {/* Content */}
+                              <div className="flex-1 min-w-0 space-y-0.5">
+                                <div className="flex items-center justify-between gap-1">
+                                  <h4
+                                    className={`text-xs font-bold leading-snug m-0 truncate ${
+                                      isUnread ? 'text-[var(--ink)] font-extrabold' : 'text-[var(--ink)]/80'
+                                    }`}
+                                  >
+                                    {n.title}
+                                  </h4>
+                                  <span className="text-[10px] text-[var(--mute)] font-mono whitespace-nowrap shrink-0">
+                                    {formatNotifTime(n.timestamp)}
+                                  </span>
+                                </div>
+
+                                <p className="text-[11.5px] text-[var(--mute)] line-clamp-2 leading-relaxed m-0">
+                                  {n.message}
+                                </p>
+
+                                {n.source && (
+                                  <span className="inline-block text-[10px] text-[var(--green)] font-semibold">
+                                    {n.source}
+                                  </span>
+                                )}
+                              </div>
+
+                              {/* Facebook Blue Dot */}
+                              {isUnread && (
+                                <span
+                                  className="w-2.5 h-2.5 rounded-full bg-blue-600 shrink-0 self-center shadow-xs"
+                                  title="غير مقروء"
+                                />
+                              )}
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
+
+                    {/* Footer */}
+                    <div className="p-2 bg-[var(--bg)]/60 border-t border-[var(--line)]/60 text-center">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setView('news');
+                          setIsNotifMenuOpen(false);
+                        }}
+                        className="w-full py-1.5 px-3 rounded-xl hover:bg-[var(--card)] text-xs font-bold text-[var(--green)] flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                      >
+                        <span>عرض كافة المستجدات والأخبار المحلية</span>
+                        <ExternalLink className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
 
@@ -7889,10 +8256,10 @@ export default function App() {
                     <div>
                       <b className="text-xs text-[var(--ink)] flex items-center gap-1.5">
                         <Download className="w-4 h-4 text-[var(--green)]" />
-                        <span>إدارة ملف APK وروابط تحميل تطبيق الأندرويد</span>
+                        <span>إدارة وإعادة ضبط ملف APK لتطبيق الأندرويد</span>
                       </b>
                       <p className="text-[11px] text-[var(--mute)] m-0 mt-0.5">
-                        رفع ملف APK الفعلي إلى الخادم أو ربط زر التنزيل برابط خارجي مباشر (Google Drive / GitHub)
+                        حذف ملف APK القديم وإعادة تعيينه من جديد على أندرويد (رفع حزمة .apk جديدة أو ربط رابط مباشر أو تفعيل WebAPK الرسمي)
                       </p>
                     </div>
                   </div>
@@ -7906,8 +8273,37 @@ export default function App() {
                       }}
                       className="flex-1 py-2.5 px-4 rounded-xl bg-[var(--green)] text-[var(--on)] text-xs font-bold flex items-center justify-center gap-2 cursor-pointer transition-opacity hover:opacity-90 shadow-xs"
                     >
-                      <Download className="w-4 h-4" />
-                      <span>فتح لوحة إدارة ملف APK والرابط المباشر</span>
+                      <RotateCcw className="w-4 h-4" />
+                      <span>فتح لوحة حذف وإعادة تعيين APK للأندرويد</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        try {
+                          const res = await fetch('/api/apk/reset', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ mode: 'android_webapk', version: '2.5.0' }),
+                          });
+                          if (res.ok) {
+                            if ('caches' in window) {
+                              const keys = await window.caches.keys();
+                              await Promise.all(keys.map((k) => window.caches.delete(k)));
+                            }
+                            pushInAppNotification({
+                              type: 'system',
+                              title: 'إعادة ضبط ملف APK للأندرويد',
+                              message:
+                                'تم حذف ملف APK القديم وتنظيف الذاكرة المؤقتة وإعادة تعيين الحزمة الرسمية من جديد بنجاح.',
+                            });
+                          }
+                        } catch {}
+                      }}
+                      className="py-2.5 px-3.5 rounded-xl border border-[var(--bad)] text-[var(--bad)] hover:bg-[var(--bad)]/10 text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer transition-colors"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span>حذف وإعادة ضبط APK فوراً</span>
                     </button>
 
                     <button

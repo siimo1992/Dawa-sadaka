@@ -18,19 +18,26 @@ import {
   Sparkles,
   ArrowRight,
   FileArchive,
+  Trash2,
+  RotateCcw,
+  RefreshCw,
 } from 'lucide-react';
 import { usePWAInstall } from '../lib/api';
 
+export type ApkReleaseMode = 'android_webapk' | 'external_url' | 'uploaded_file';
+
 export interface ApkReleaseConfig {
-  mode: 'external_url' | 'uploaded_file';
+  mode: ApkReleaseMode;
   externalUrl: string;
   normalizedDownloadUrl: string;
   iosAppStoreUrl: string;
   version: string;
   fileSizeLabel: string;
   fileName: string;
+  originalUploadedName?: string;
   releaseNotes: string;
   updatedAt: number;
+  lastResetAt?: number;
   hasCustomUploadedApk: boolean;
   uploadedFileSizeBytes: number;
 }
@@ -42,7 +49,11 @@ interface DownloadAppModalProps {
   openInOwnerMode?: boolean;
 }
 
-function previewNormalizedUrl(rawUrl: string): { url: string; isGoogleDrive: boolean; isDropbox: boolean } {
+function previewNormalizedUrl(rawUrl: string): {
+  url: string;
+  isGoogleDrive: boolean;
+  isDropbox: boolean;
+} {
   const trimmed = (rawUrl || '').trim();
   if (!trimmed) return { url: '', isGoogleDrive: false, isDropbox: false };
   try {
@@ -73,6 +84,35 @@ function previewNormalizedUrl(rawUrl: string): { url: string; isGoogleDrive: boo
   }
 }
 
+/**
+ * Purges stale Android browser CacheStorage and forces Service Worker + Manifest refresh
+ * so Android treats the re-assigned APK / WebAPK as brand new.
+ */
+export async function purgeAndroidApkClientCache(): Promise<void> {
+  try {
+    if ('caches' in window) {
+      const keys = await window.caches.keys();
+      await Promise.all(keys.map((k) => window.caches.delete(k)));
+    }
+  } catch {}
+
+  try {
+    if ('serviceWorker' in navigator) {
+      const registrations = await navigator.serviceWorker.getRegistrations();
+      for (const reg of registrations) {
+        await reg.update().catch(() => {});
+      }
+    }
+  } catch {}
+
+  try {
+    const manifestLink = document.querySelector('link[rel="manifest"]') as HTMLLinkElement | null;
+    if (manifestLink) {
+      manifestLink.href = `/manifest.webmanifest?reset=${Date.now()}`;
+    }
+  } catch {}
+}
+
 export const DownloadAppModal: React.FC<DownloadAppModalProps> = ({
   isOpen,
   onClose,
@@ -97,22 +137,38 @@ export const DownloadAppModal: React.FC<DownloadAppModalProps> = ({
   const [copiedLink, setCopiedLink] = useState<boolean>(false);
 
   // Owner form state
-  const [formMode, setFormMode] = useState<'external_url' | 'uploaded_file'>('external_url');
+  const [formMode, setFormMode] = useState<ApkReleaseMode>('android_webapk');
   const [formExternalUrl, setFormExternalUrl] = useState<string>('');
   const [formIosUrl, setFormIosUrl] = useState<string>('');
   const [formVersion, setFormVersion] = useState<string>('2.5.0');
   const [formSizeLabel, setFormSizeLabel] = useState<string>('18.4 MB');
   const [formFileName, setFormFileName] = useState<string>('tidikelt-ai-release.apk');
   const [formReleaseNotes, setFormReleaseNotes] = useState<string>('');
+  const [keepOfficialApkName, setKeepOfficialApkName] = useState<boolean>(true);
 
-  // Upload state for owner
+  // Upload & Reset state
   const [isUploadingApk, setIsUploadingApk] = useState<boolean>(false);
   const [uploadProgressPct, setUploadProgressPct] = useState<number>(0);
+  const [isResettingApk, setIsResettingApk] = useState<boolean>(false);
   const [ownerSaveFeedback, setOwnerSaveFeedback] = useState<{
     type: 'success' | 'error';
     text: string;
   } | null>(null);
   const [isSavingConfig, setIsSavingConfig] = useState<boolean>(false);
+
+  const syncFormWithConfig = (data: ApkReleaseConfig) => {
+    setConfig(data);
+    setFormMode(data.mode || 'android_webapk');
+    setFormExternalUrl(data.externalUrl || '');
+    setFormIosUrl(data.iosAppStoreUrl || '');
+    setFormVersion(data.version || '2.5.0');
+    setFormSizeLabel(data.fileSizeLabel || '18.4 MB');
+    setFormFileName(data.fileName || 'tidikelt-ai-release.apk');
+    setFormReleaseNotes(
+      data.releaseNotes ||
+        'النسخة الرسمية لمنصة تيديكلت AI على أندرويد — دعم المحادثة الذكية، رفيق الطريق، ومستجدات عين صالح.'
+    );
+  };
 
   const fetchApkInfo = async () => {
     setIsLoadingConfig(true);
@@ -120,14 +176,7 @@ export const DownloadAppModal: React.FC<DownloadAppModalProps> = ({
       const res = await fetch('/api/apk/info', { cache: 'no-store' });
       if (res.ok) {
         const data: ApkReleaseConfig = await res.json();
-        setConfig(data);
-        setFormMode(data.mode);
-        setFormExternalUrl(data.externalUrl || '');
-        setFormIosUrl(data.iosAppStoreUrl || '');
-        setFormVersion(data.version || '2.5.0');
-        setFormSizeLabel(data.fileSizeLabel || '18.4 MB');
-        setFormFileName(data.fileName || 'tidikelt-ai-release.apk');
-        setFormReleaseNotes(data.releaseNotes || '');
+        syncFormWithConfig(data);
       }
     } catch (err) {
       console.warn('Failed to fetch APK info:', err);
@@ -161,7 +210,7 @@ export const DownloadAppModal: React.FC<DownloadAppModalProps> = ({
     }
   };
 
-  // Determines if a ready APK source exists (either external URL or uploaded valid APK)
+  // Determines active APK delivery mode
   const isExternalReady = Boolean(
     config &&
       config.mode === 'external_url' &&
@@ -174,34 +223,116 @@ export const DownloadAppModal: React.FC<DownloadAppModalProps> = ({
   const hasFallbackExternal = Boolean(
     config && config.normalizedDownloadUrl && config.normalizedDownloadUrl.trim().length > 0
   );
-  const hasAnyValidApkSource = isExternalReady || isUploadedReady || hasFallbackExternal || Boolean(config?.hasCustomUploadedApk);
+  const hasBinaryApkSource =
+    isExternalReady || isUploadedReady || hasFallbackExternal || Boolean(config?.hasCustomUploadedApk);
 
   const activeDirectUrl =
     isExternalReady && config
       ? config.normalizedDownloadUrl
       : isUploadedReady
-      ? '/api/apk/download?source=local'
+      ? `/api/apk/download?source=local&t=${config?.updatedAt || Date.now()}`
       : hasFallbackExternal && config
       ? config.normalizedDownloadUrl
       : config?.hasCustomUploadedApk
-      ? '/api/apk/download?source=local'
+      ? `/api/apk/download?source=local&t=${config?.updatedAt || Date.now()}`
       : '';
+
+  /**
+   * Complete Delete & Reset of APK on Server + Android Client Cache,
+   * optionally opening the file selector immediately to assign a new APK from Android.
+   */
+  const handleResetAndReassignApk = async (options?: {
+    openFilePickerAfter?: boolean;
+    switchToTab?: 'owner' | 'download';
+  }) => {
+    if (isResettingApk) return;
+    setIsResettingApk(true);
+    setDownloadStatusMsg(null);
+    setOwnerSaveFeedback(null);
+
+    try {
+      const res = await fetch('/api/apk/reset', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          mode: 'android_webapk',
+          version: '2.5.0',
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data?.error || 'تعذر إعادة ضبط ملف APK.');
+      }
+
+      // Purge Android CacheStorage, update ServiceWorker & cache-bust manifest
+      await purgeAndroidApkClientCache();
+
+      if (data.config) {
+        syncFormWithConfig(data.config);
+      }
+
+      const resetMsg =
+        'تم حذف ملف APK القديم وتنظيف ذاكرة الأندرويد وإعادة تعيين حزمة تيديكلت AI الرسمية من جديد بنجاح!';
+
+      setDownloadStatusMsg({
+        type: 'success',
+        text: resetMsg,
+      });
+      setOwnerSaveFeedback({
+        type: 'success',
+        text: resetMsg,
+      });
+
+      if (options?.switchToTab) {
+        setActiveTab(options.switchToTab);
+      }
+
+      if (options?.openFilePickerAfter) {
+        setActiveTab('owner');
+        setFormMode('uploaded_file');
+        setTimeout(() => {
+          fileInputRef.current?.click();
+        }, 180);
+      }
+    } catch (err: any) {
+      const errorText = err?.message || 'حدث خطأ أثناء حذف وإعادة ضبط ملف APK.';
+      setDownloadStatusMsg({ type: 'error', text: errorText });
+      setOwnerSaveFeedback({ type: 'error', text: errorText });
+    } finally {
+      setIsResettingApk(false);
+    }
+  };
 
   const handleDownloadAndroidApk = async (e: React.MouseEvent) => {
     setDownloadStatusMsg(null);
 
-    if (!hasAnyValidApkSource || !config) {
+    // If no external URL or uploaded binary APK is set (i.e. mode is android_webapk),
+    // trigger native Android WebAPK installation or guide the user smoothly!
+    if (!hasBinaryApkSource || !config) {
       e.preventDefault();
+      if (isInstallable) {
+        const accepted = await installPWA();
+        if (accepted) {
+          setDownloadStatusMsg({
+            type: 'success',
+            text: 'تم تثبيت وتعيين تطبيق تيديكلت AI على هاتفك الأندرويد بنجاح!',
+          });
+        }
+        return;
+      }
+
       setDownloadStatusMsg({
-        type: 'error',
-        text: 'لم يقم المالك برفع ملف APK أو ربط الرابط الخارجي المباشر بعد. يمكنك التثبيت الفوري المباشر عبر الزر أدناه أو إعداد الرابط من لوحة المالك.',
+        type: 'info',
+        text: 'الحزمة مُعينة حالياً على الوضع المباشر للأندرويد (WebAPK). للتثبيت الفوري بدون ملف خارجي: افتح قائمة متصفح كروم (⋮) واختر «تثبيت التطبيق»، أو اضغط «تعيين ملف APK جديد» لرفع ملف .apk خاص بك.',
       });
       return;
     }
 
     // Case 1: External Direct Link (Google Drive / GitHub / Direct server)
-    if ((config.mode === 'external_url' && config.normalizedDownloadUrl) || (!config.hasCustomUploadedApk && config.normalizedDownloadUrl)) {
-      // Let the anchor tag open the external direct URL naturally, and display helpful status
+    if (
+      (config.mode === 'external_url' && config.normalizedDownloadUrl) ||
+      (!config.hasCustomUploadedApk && config.normalizedDownloadUrl)
+    ) {
       setDownloadStatusMsg({
         type: 'success',
         text: 'جاري بدء التحميل المباشر من الرابط المعتمد... إذا لم يبدأ تلقائياً، اضغط على زر «فتح الرابط المباشر» أدناه.',
@@ -217,11 +348,11 @@ export const DownloadAppModal: React.FC<DownloadAppModalProps> = ({
     setDownloadProgressPct(0);
     setDownloadStatusMsg({
       type: 'info',
-      text: 'جاري تنزيل حزمة APK والتحقق من اكتمال الملف 100%...',
+      text: 'جاري تنزيل حزمة APK المعيّنة والتحقق من اكتمال الملف 100%...',
     });
 
     try {
-      const response = await fetch('/api/apk/download?source=local', {
+      const response = await fetch(`/api/apk/download?source=local&t=${Date.now()}`, {
         method: 'GET',
         cache: 'no-store',
       });
@@ -232,7 +363,9 @@ export const DownloadAppModal: React.FC<DownloadAppModalProps> = ({
       }
 
       const contentLengthHeader = response.headers.get('Content-Length');
-      const totalBytes = contentLengthHeader ? parseInt(contentLengthHeader, 10) : config.uploadedFileSizeBytes || 0;
+      const totalBytes = contentLengthHeader
+        ? parseInt(contentLengthHeader, 10)
+        : config.uploadedFileSizeBytes || 0;
 
       if (!response.body) {
         const blob = await response.blob();
@@ -269,12 +402,12 @@ export const DownloadAppModal: React.FC<DownloadAppModalProps> = ({
 
       setDownloadStatusMsg({
         type: 'success',
-        text: 'اكتمل تنزيل ملف APK بنسبة 100% بنجاح! افتح الملف من إشعارات التنزيل لتثبيت التطبيق.',
+        text: 'اكتمل تنزيل ملف APK بنسبة 100% بنجاح! افتح الملف من إشعارات التنزيل في الأندرويد لتثبيت التطبيق.',
       });
     } catch (err: any) {
       setDownloadStatusMsg({
         type: 'error',
-        text: err?.message || 'حدث خطأ أثناء التنزيل. يمكنك استخدام الرابط المباشر الاحتياطي.',
+        text: err?.message || 'حدث خطأ أثناء التنزيل. يمكنك إعادة ضبط الملف أو استخدام الرابط المباشر.',
       });
     } finally {
       setIsDownloadingApk(false);
@@ -319,7 +452,7 @@ export const DownloadAppModal: React.FC<DownloadAppModalProps> = ({
     if (formMode === 'uploaded_file' && !config?.hasCustomUploadedApk) {
       setOwnerSaveFeedback({
         type: 'error',
-        text: 'يرجى رفع ملف .apk من جهازك أولاً أو اختيار وضع الرابط الخارجي المباشر.',
+        text: 'يرجى اختيار ورفع ملف .apk من جهازك الأندرويد أولاً أو اختيار وضع الحزمة المدمجة / الرابط الخارجي.',
       });
       return;
     }
@@ -343,10 +476,10 @@ export const DownloadAppModal: React.FC<DownloadAppModalProps> = ({
       if (!res.ok) {
         throw new Error(data?.error || 'تعذر حفظ الإعدادات');
       }
-      setConfig(data.config);
+      syncFormWithConfig(data.config);
       setOwnerSaveFeedback({
         type: 'success',
-        text: 'تم حفظ واعتماد إعدادات تحميل APK بنجاح! يمكن للزوار التحميل الآن.',
+        text: 'تم حفظ وإعادة تعيين إعدادات حزمة الأندرويد بنجاح!',
       });
     } catch (err: any) {
       setOwnerSaveFeedback({
@@ -407,6 +540,7 @@ export const DownloadAppModal: React.FC<DownloadAppModalProps> = ({
     xhr.open('POST', '/api/apk/upload', true);
     xhr.setRequestHeader('Content-Type', 'application/vnd.android.package-archive');
     xhr.setRequestHeader('X-Apk-Filename', encodeURIComponent(file.name));
+    xhr.setRequestHeader('X-Apk-Keep-Official-Name', keepOfficialApkName ? 'true' : 'false');
     xhr.setRequestHeader('X-Apk-Version', encodeURIComponent(formVersion || '2.5.0'));
 
     xhr.upload.onprogress = (event) => {
@@ -415,24 +549,24 @@ export const DownloadAppModal: React.FC<DownloadAppModalProps> = ({
       }
     };
 
-    xhr.onload = () => {
+    xhr.onload = async () => {
       setIsUploadingApk(false);
       e.target.value = '';
       try {
         const resp = JSON.parse(xhr.responseText);
         if (xhr.status >= 200 && xhr.status < 300 && resp?.config) {
-          setConfig(resp.config);
-          setFormMode('uploaded_file');
-          setFormFileName(resp.config.fileName);
-          setFormSizeLabel(resp.config.fileSizeLabel);
+          await purgeAndroidApkClientCache();
+          syncFormWithConfig(resp.config);
           setOwnerSaveFeedback({
             type: 'success',
-            text: resp.message || 'تم رفع ملف APK واعتماده للتحميل المباشر بنجاح!',
+            text:
+              resp.message ||
+              'تم حذف النسخة السابقة وتعيين ملف APK الجديد للأندرويد بنجاح!',
           });
         } else {
           setOwnerSaveFeedback({
             type: 'error',
-            text: resp?.error || 'فشل رفع ملف الـ APK.',
+            text: resp?.error || 'فشل رفع وتعيين ملف الـ APK.',
           });
         }
       } catch {
@@ -464,9 +598,21 @@ export const DownloadAppModal: React.FC<DownloadAppModalProps> = ({
       aria-labelledby="downloadTitle"
       onClick={handleBackdropClick}
       onClose={onClose}
-      className="fixed inset-0 m-auto z-50 p-0 rounded-2xl border border-[var(--line)] bg-[var(--card)] text-[var(--ink)] shadow-2xl backdrop:bg-black/65 backdrop:backdrop-blur-sm max-w-[480px] w-[94vw] max-h-[90vh] overflow-y-auto"
+      className="fixed inset-0 m-auto z-50 p-0 rounded-2xl border border-[var(--line)] bg-[var(--card)] text-[var(--ink)] shadow-2xl backdrop:bg-black/65 backdrop:backdrop-blur-sm max-w-[490px] w-[94vw] max-h-[90vh] overflow-y-auto"
     >
-      <div className="relative p-5 sm:p-6 bg-[var(--card)] text-[var(--ink)] font-sans leading-relaxed text-right" dir="rtl">
+      <div
+        className="relative p-4 sm:p-6 bg-[var(--card)] text-[var(--ink)] font-sans leading-relaxed text-right"
+        dir="rtl"
+      >
+        {/* Hidden Global File Input so Reset & Re-assign can trigger it from anywhere */}
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".apk,application/vnd.android.package-archive"
+          onChange={handleFileSelectUpload}
+          className="hidden"
+        />
+
         {/* Top Header Bar */}
         <div className="flex items-center justify-between gap-2 pb-3.5 mb-4 border-b border-[var(--line)]">
           <div className="flex items-center gap-2.5 min-w-0">
@@ -474,12 +620,17 @@ export const DownloadAppModal: React.FC<DownloadAppModalProps> = ({
               <Smartphone className="w-5 h-5" />
             </div>
             <div className="min-w-0">
-              <h2 id="downloadTitle" className="text-base sm:text-lg font-extrabold text-[var(--ink)] m-0 truncate">
-                {activeTab === 'owner' ? 'إدارة ملف APK وروابط التحميل' : 'تنزيل تطبيق تيديكلت AI'}
+              <h2
+                id="downloadTitle"
+                className="text-base sm:text-lg font-extrabold text-[var(--ink)] m-0 truncate"
+              >
+                {activeTab === 'owner'
+                  ? 'إعادة ضبط وتعيين ملف APK للأندرويد'
+                  : 'تنزيل وتثبيت تيديكلت AI للأندرويد'}
               </h2>
               <p className="text-xs text-[var(--mute)] m-0 truncate">
                 {activeTab === 'owner'
-                  ? 'لوحة المالك لرفع حزمة الأندرويد أو ربط رابط مباشر'
+                  ? 'حذف النسخة القديمة وإعادة تعيين ملف APK من جديد على أندرويد'
                   : 'النسخة الرسمية الكاملة لهواتف أندرويد وآيفون'}
               </p>
             </div>
@@ -489,7 +640,11 @@ export const DownloadAppModal: React.FC<DownloadAppModalProps> = ({
             <button
               type="button"
               onClick={() => setActiveTab(activeTab === 'download' ? 'owner' : 'download')}
-              title={activeTab === 'download' ? 'إعدادات المالك لملف APK والرابط' : 'العودة لنافذة التحميل'}
+              title={
+                activeTab === 'download'
+                  ? 'إعادة ضبط أو تعيين ملف APK'
+                  : 'العودة لنافذة التحميل'
+              }
               className={`px-2.5 h-9 rounded-xl border text-xs font-bold flex items-center gap-1.5 cursor-pointer transition-colors ${
                 activeTab === 'owner'
                   ? 'bg-[#176b52] text-white border-[#176b52]'
@@ -504,7 +659,7 @@ export const DownloadAppModal: React.FC<DownloadAppModalProps> = ({
               ) : (
                 <>
                   <Settings className="w-3.5 h-3.5 text-[#176b52]" />
-                  <span>{isAdminLoggedIn ? 'إدارة APK' : 'إعداد الرابط'}</span>
+                  <span>إعادة ضبط APK</span>
                 </>
               )}
             </button>
@@ -521,23 +676,23 @@ export const DownloadAppModal: React.FC<DownloadAppModalProps> = ({
           </div>
         </div>
 
-        {/* ===================== TAB 1: VISITOR DOWNLOAD VIEW ===================== */}
+        {/* ===================== TAB 1: VISITOR & ANDROID QUICK RESET VIEW ===================== */}
         {activeTab === 'download' && (
           <div className="space-y-4">
-            {/* Release Metadata Strip */}
-            <div className="p-3.5 rounded-xl bg-[var(--bg)] border border-[var(--line)] space-y-2">
+            {/* Release Metadata & Current Assignment Status Card */}
+            <div className="p-3.5 rounded-xl bg-[var(--bg)] border border-[var(--line)] space-y-2.5">
               <div className="flex items-center justify-between gap-2 text-xs">
                 <div className="flex items-center gap-1.5 font-bold text-[var(--ink)]">
                   <ShieldCheck className="w-4 h-4 text-[#176b52] shrink-0" />
-                  <span>إصدار الأندرويد الرسمي</span>
+                  <span>حزمة تيديكلت AI للأندرويد</span>
                   <span className="font-mono tabular-nums text-[#176b52]">
                     v{config?.version || '2.5.0'}
                   </span>
                 </div>
                 <div className="flex items-center gap-1.5 text-xs text-[var(--mute)] font-mono tabular-nums">
-                  <span>الحجم: {config?.fileSizeLabel || '18.4 MB'}</span>
+                  <span>{config?.fileSizeLabel || '18.4 MB'}</span>
                   <span>·</span>
-                  <span>APK</span>
+                  <span>{config?.fileName || 'tidikelt-ai-release.apk'}</span>
                 </div>
               </div>
 
@@ -547,57 +702,112 @@ export const DownloadAppModal: React.FC<DownloadAppModalProps> = ({
                 </p>
               )}
 
-              {/* Source readiness indicator */}
-              <div className="pt-1.5 border-t border-[var(--line)]/60 flex items-center justify-between text-[11px]">
-                {hasAnyValidApkSource ? (
-                  <span className="text-[#176b52] font-bold flex items-center gap-1">
-                    <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
-                    <span>
-                      {isExternalReady
-                        ? 'مرتبط برابط تحميل خارجي مباشر ومفحوص'
-                        : 'حزمة APK مرفوعة ومفحوصة بالكامل على الخادم'}
-                    </span>
+              {/* Active Android Assignment Badge */}
+              <div className="pt-2 border-t border-[var(--line)]/60 flex flex-wrap items-center justify-between gap-2 text-[11px]">
+                <span className="text-[#176b52] font-bold flex items-center gap-1.5">
+                  <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+                  <span>
+                    {isUploadedReady
+                      ? `مُعيّن على ملف APK مرفوع (${config?.fileName} · ${config?.fileSizeLabel})`
+                      : isExternalReady
+                      ? 'مُعيّن على رابط تحميل APK خارجي مباشر'
+                      : 'مُعيّن على الحزمة الرسمية المدمجة لأندرويد (WebAPK)'}
                   </span>
-                ) : (
-                  <span className="text-amber-600 dark:text-amber-400 font-semibold flex items-center gap-1">
-                    <AlertCircle className="w-3.5 h-3.5 shrink-0" />
-                    <span>بانتظار ربط رابط APK الخارجي أو رفع الحزمة من المالك</span>
-                  </span>
-                )}
+                </span>
 
                 <button
                   type="button"
                   onClick={() => setActiveTab('owner')}
-                  className="text-[#176b52] hover:underline font-bold cursor-pointer"
+                  className="text-[#176b52] hover:underline font-bold cursor-pointer flex items-center gap-1"
                 >
-                  تحديث الرابط
+                  <RotateCcw className="w-3 h-3" />
+                  <span>حذف / إعادة تعيين</span>
                 </button>
               </div>
             </div>
 
-            {/* Primary Android APK Download Button */}
+            {/* Quick Android APK Delete & Re-assign Bar */}
+            <div className="p-3 rounded-xl bg-amber-500/8 border border-amber-500/25 space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs font-extrabold text-[var(--ink)] flex items-center gap-1.5">
+                  <RotateCcw className="w-4 h-4 text-[#176b52]" />
+                  <span>إعادة ضبط ملف APK وتعيينه من جديد على أندرويد</span>
+                </span>
+              </div>
+              <p className="text-[11px] text-[var(--mute)] m-0 leading-relaxed">
+                يمكنك حذف أي ملف APK قديم أو عالق وتنظيف ذاكرة التخزين المؤقت للأندرويد ثم إعادة تعيين ملف APK جديد فوراً:
+              </p>
+              <div className="grid grid-cols-2 gap-2 pt-0.5">
+                <button
+                  type="button"
+                  disabled={isResettingApk}
+                  onClick={() => handleResetAndReassignApk()}
+                  className="py-2 px-3 rounded-xl border border-rose-500/40 bg-rose-500/10 hover:bg-rose-500/20 text-rose-700 dark:text-rose-300 text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer transition-colors min-h-[40px]"
+                >
+                  {isResettingApk ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" />
+                  ) : (
+                    <Trash2 className="w-3.5 h-3.5 shrink-0" />
+                  )}
+                  <span>حذف وإعادة ضبط APK</span>
+                </button>
+
+                <button
+                  type="button"
+                  disabled={isResettingApk || isUploadingApk}
+                  onClick={() =>
+                    handleResetAndReassignApk({
+                      openFilePickerAfter: true,
+                      switchToTab: 'owner',
+                    })
+                  }
+                  className="py-2 px-3 rounded-xl border border-[#176b52]/40 bg-[#176b52]/12 hover:bg-[#176b52] hover:text-white text-[#176b52] text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer transition-colors min-h-[40px]"
+                >
+                  <Upload className="w-3.5 h-3.5 shrink-0" />
+                  <span>حذف وتعيين APK جديد</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Primary Android APK Download / Install Button */}
             <div className="space-y-2.5">
               <a
                 className="platform-link android flex items-center justify-center gap-2.5 w-full py-3.5 px-4 rounded-xl font-bold text-white bg-[#176b52] hover:bg-[#125742] transition-all shadow-md hover:shadow-lg no-underline text-center min-h-[50px] cursor-pointer"
                 href={activeDirectUrl || '#'}
-                target={isExternalReady || (!isUploadedReady && hasFallbackExternal) ? '_blank' : undefined}
-                rel={isExternalReady || (!isUploadedReady && hasFallbackExternal) ? 'noopener noreferrer' : undefined}
-                download={isUploadedReady ? config?.fileName || 'tidikelt-ai-release.apk' : undefined}
+                target={
+                  isExternalReady || (!isUploadedReady && hasFallbackExternal)
+                    ? '_blank'
+                    : undefined
+                }
+                rel={
+                  isExternalReady || (!isUploadedReady && hasFallbackExternal)
+                    ? 'noopener noreferrer'
+                    : undefined
+                }
+                download={
+                  isUploadedReady ? config?.fileName || 'tidikelt-ai-release.apk' : undefined
+                }
                 onClick={handleDownloadAndroidApk}
               >
                 {isDownloadingApk ? (
                   <>
                     <Loader2 className="w-5 h-5 shrink-0 animate-spin" />
                     <span className="tabular-nums">
-                      جاري تنزيل الحزمة الكاملة... {downloadProgressPct !== null ? `${downloadProgressPct}%` : ''}
+                      جاري تنزيل الحزمة الكاملة...{' '}
+                      {downloadProgressPct !== null ? `${downloadProgressPct}%` : ''}
+                    </span>
+                  </>
+                ) : hasBinaryApkSource ? (
+                  <>
+                    <Download className="w-5 h-5 shrink-0" />
+                    <span>
+                      تنزيل ملف APK للأندرويد ({config?.fileSizeLabel || 'نسخة كاملة'})
                     </span>
                   </>
                 ) : (
                   <>
-                    <Download className="w-5 h-5 shrink-0" />
-                    <span>
-                      تنزيل APK لأندرويد ({config?.fileSizeLabel || 'نسخة كاملة'})
-                    </span>
+                    <Smartphone className="w-5 h-5 shrink-0" />
+                    <span>تثبيت حزمة تيديكلت AI الرسمية على أندرويد</span>
                   </>
                 )}
               </a>
@@ -618,7 +828,7 @@ export const DownloadAppModal: React.FC<DownloadAppModalProps> = ({
               )}
 
               {/* Direct External Link Helper Actions (Open in new tab / Copy direct link) */}
-              {hasAnyValidApkSource && activeDirectUrl && (
+              {hasBinaryApkSource && activeDirectUrl && (
                 <div className="flex items-center gap-2">
                   <a
                     href={activeDirectUrl}
@@ -651,7 +861,7 @@ export const DownloadAppModal: React.FC<DownloadAppModalProps> = ({
                 </div>
               )}
 
-              {/* Download status message */}
+              {/* Download / Reset status message */}
               {downloadStatusMsg && (
                 <div
                   className={`p-3 rounded-xl border text-xs font-semibold leading-relaxed flex items-start gap-2 ${
@@ -669,31 +879,31 @@ export const DownloadAppModal: React.FC<DownloadAppModalProps> = ({
                   )}
                   <div className="space-y-1.5 flex-1">
                     <p className="m-0">{downloadStatusMsg.text}</p>
-                    {downloadStatusMsg.type === 'error' && (
+                    <div className="flex flex-wrap gap-2 pt-1">
                       <button
                         type="button"
                         onClick={() => setActiveTab('owner')}
                         className="px-2.5 py-1 rounded-lg bg-[#176b52] text-white text-[11px] font-bold cursor-pointer"
                       >
-                        فتح إعدادات المالك لربط ملف APK الآن
+                        فتح لوحة إعادة تعيين APK للأندرويد
                       </button>
-                    )}
+                    </div>
                   </div>
                 </div>
               )}
             </div>
 
-            {/* Instant Browser / WebAPK Installation Option (Works immediately without external APK) */}
+            {/* Instant Browser / WebAPK Installation Option */}
             {!isInstalled && (
               <div className="p-3.5 rounded-xl bg-[#176b52]/8 border border-[#176b52]/25 space-y-2">
                 <div className="flex items-center justify-between gap-2">
                   <span className="text-xs font-extrabold text-[var(--ink)] flex items-center gap-1.5">
                     <Sparkles className="w-4 h-4 text-[#176b52]" />
-                    <span>تثبيت فوري مباشر (بدون انتظار تحميل APK)</span>
+                    <span>تثبيت أندرويد المباشر (WebAPK الرسمي لتيديكلت AI)</span>
                   </span>
                 </div>
                 <p className="text-[11px] text-[var(--mute)] m-0 leading-relaxed">
-                  يمكنك تثبيت تطبيق <b>تيديكلت AI</b> مباشرة على شاشة هاتفك بضغطة واحدة عبر تقنية WebAPK بدون الحاجة لتنزيل حزمة خارجية:
+                  يمكنك تثبيت تطبيق <b>تيديكلت AI</b> مباشرة على شاشة هاتفك الأندرويد بضغطة واحدة عبر حزمة WebAPK المدمجة:
                 </p>
                 {isInstallable ? (
                   <button
@@ -702,11 +912,12 @@ export const DownloadAppModal: React.FC<DownloadAppModalProps> = ({
                     className="w-full py-2.5 px-4 rounded-xl bg-[var(--card)] border border-[#176b52] text-[#176b52] hover:bg-[#176b52] hover:text-white text-xs font-bold flex items-center justify-center gap-2 cursor-pointer transition-colors min-h-[44px]"
                   >
                     <Smartphone className="w-4 h-4" />
-                    <span>تثبيت التطبيق فوراً على الهاتف</span>
+                    <span>تثبيت التطبيق فوراً على الأندرويد</span>
                   </button>
                 ) : (
                   <div className="text-[11px] text-[#176b52] font-bold bg-[var(--card)] p-2.5 rounded-lg border border-[var(--line)]">
-                    من قائمة متصفح Chrome (⋮) في أعلى الشاشة اختر <b>«تثبيت التطبيق» (Install App)</b> أو <b>«الإضافة إلى الشاشة الرئيسية»</b>.
+                    من قائمة متصفح Chrome (⋮) في أعلى شاشة الأندرويد اختر{' '}
+                    <b>«تثبيت التطبيق» (Install App)</b> أو <b>«الإضافة إلى الشاشة الرئيسية»</b>.
                   </div>
                 )}
               </div>
@@ -747,55 +958,229 @@ export const DownloadAppModal: React.FC<DownloadAppModalProps> = ({
           </div>
         )}
 
-        {/* ===================== TAB 2: OWNER APK MANAGER VIEW ===================== */}
+        {/* ===================== TAB 2: OWNER APK RESET & RE-ASSIGN VIEW ===================== */}
         {activeTab === 'owner' && (
           <form onSubmit={handleSaveOwnerConfig} className="space-y-4">
-            {/* Mode Selector Tabs */}
-            <div className="grid grid-cols-2 gap-2 p-1 rounded-xl bg-[var(--bg)] border border-[var(--line)]">
-              <button
-                type="button"
-                onClick={() => setFormMode('external_url')}
-                className={`py-2.5 px-3 rounded-lg text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer transition-colors ${
-                  formMode === 'external_url'
-                    ? 'bg-[#176b52] text-white shadow-xs'
-                    : 'text-[var(--mute)] hover:text-[var(--ink)]'
-                }`}
-              >
-                <Link2 className="w-4 h-4 shrink-0" />
-                <span>رابط خارجي مباشر</span>
-              </button>
+            {/* Dedicated Reset & Delete Card */}
+            <div className="p-3.5 rounded-xl bg-rose-500/8 border border-rose-500/30 space-y-2.5">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs font-extrabold text-rose-700 dark:text-rose-300 flex items-center gap-1.5">
+                  <RotateCcw className="w-4 h-4 shrink-0" />
+                  <span>إعادة ضبط وحذف ملف APK الحالي (Reset Android APK)</span>
+                </span>
+                {config?.hasCustomUploadedApk && (
+                  <span className="text-[10px] px-2 py-0.5 rounded-md bg-rose-500/15 text-rose-700 dark:text-rose-300 font-mono">
+                    يوجد ملف مرفوع ({config.fileSizeLabel})
+                  </span>
+                )}
+              </div>
 
-              <button
-                type="button"
-                onClick={() => setFormMode('uploaded_file')}
-                className={`py-2.5 px-3 rounded-lg text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer transition-colors ${
-                  formMode === 'uploaded_file'
-                    ? 'bg-[#176b52] text-white shadow-xs'
-                    : 'text-[var(--mute)] hover:text-[var(--ink)]'
-                }`}
-              >
-                <Upload className="w-4 h-4 shrink-0" />
-                <span>رفع ملف APK للخادم</span>
-              </button>
+              <p className="text-[11px] text-[var(--mute)] m-0 leading-relaxed">
+                يؤدي هذا الإجراء إلى حذف ملف الـ APK المرفوع سابقاً من الخادم نهائياً، مسح ذاكرة التخزين المؤقت على الأندرويد، وإعادة تعيين إعدادات الحزمة إلى الوضع النظيف من جديد:
+              </p>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+                <button
+                  type="button"
+                  disabled={isResettingApk}
+                  onClick={() => handleResetAndReassignApk()}
+                  className="py-2.5 px-3 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer transition-colors shadow-xs min-h-[42px]"
+                >
+                  {isResettingApk ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin shrink-0" />
+                      <span>جاري الحذف وإعادة الضبط...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Trash2 className="w-4 h-4 shrink-0" />
+                      <span>حذف ملف APK وإعادة الضبط الكامل</span>
+                    </>
+                  )}
+                </button>
+
+                <button
+                  type="button"
+                  disabled={isResettingApk || isUploadingApk}
+                  onClick={() =>
+                    handleResetAndReassignApk({
+                      openFilePickerAfter: true,
+                    })
+                  }
+                  className="py-2.5 px-3 rounded-xl bg-[#176b52] hover:bg-[#125742] text-white text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer transition-colors shadow-xs min-h-[42px]"
+                >
+                  <RefreshCw className="w-4 h-4 shrink-0" />
+                  <span>حذف القديم واختيار APK جديد فوراً</span>
+                </button>
+              </div>
             </div>
 
-            {/* Option A: External Direct URL (Google Drive / GitHub / Direct) */}
+            {/* 3-Way Mode Selector Tabs for Re-assigning on Android */}
+            <div className="space-y-1.5">
+              <label className="block text-xs font-extrabold text-[var(--ink)]">
+                اختر طريقة إعادة تعيين حزمة الأندرويد الجديدة:
+              </label>
+              <div className="grid grid-cols-3 gap-1.5 p-1 rounded-xl bg-[var(--bg)] border border-[var(--line)]">
+                <button
+                  type="button"
+                  onClick={() => setFormMode('uploaded_file')}
+                  className={`py-2 px-2 rounded-lg text-[11px] font-bold flex items-center justify-center gap-1 cursor-pointer transition-colors ${
+                    formMode === 'uploaded_file'
+                      ? 'bg-[#176b52] text-white shadow-xs'
+                      : 'text-[var(--mute)] hover:text-[var(--ink)]'
+                  }`}
+                >
+                  <Upload className="w-3.5 h-3.5 shrink-0" />
+                  <span>رفع ملف APK</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setFormMode('external_url')}
+                  className={`py-2 px-2 rounded-lg text-[11px] font-bold flex items-center justify-center gap-1 cursor-pointer transition-colors ${
+                    formMode === 'external_url'
+                      ? 'bg-[#176b52] text-white shadow-xs'
+                      : 'text-[var(--mute)] hover:text-[var(--ink)]'
+                  }`}
+                >
+                  <Link2 className="w-3.5 h-3.5 shrink-0" />
+                  <span>رابط مباشر</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setFormMode('android_webapk')}
+                  className={`py-2 px-2 rounded-lg text-[11px] font-bold flex items-center justify-center gap-1 cursor-pointer transition-colors ${
+                    formMode === 'android_webapk'
+                      ? 'bg-[#176b52] text-white shadow-xs'
+                      : 'text-[var(--mute)] hover:text-[var(--ink)]'
+                  }`}
+                >
+                  <Smartphone className="w-3.5 h-3.5 shrink-0" />
+                  <span>WebAPK المدمج</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Mode 1: Direct APK File Upload from Android Device */}
+            {formMode === 'uploaded_file' && (
+              <div className="p-3.5 rounded-xl bg-[var(--bg)] border border-[var(--line)] space-y-3">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-xs font-bold text-[var(--ink)] flex items-center gap-1.5">
+                    <FileArchive className="w-4 h-4 text-[#176b52]" />
+                    <span>تعيين ورفع ملف APK من جهاز الأندرويد:</span>
+                  </span>
+                  {config?.hasCustomUploadedApk ? (
+                    <span className="text-[11px] font-bold text-[#176b52]">
+                      ✓ معيّن ({config.fileSizeLabel})
+                    </span>
+                  ) : (
+                    <span className="text-[11px] font-semibold text-[var(--mute)]">
+                      لا يوجد ملف مرفوع حالياً
+                    </span>
+                  )}
+                </div>
+
+                {config?.hasCustomUploadedApk && (
+                  <div className="p-2.5 rounded-lg bg-[var(--card)] border border-[var(--line)] flex items-center justify-between gap-2 text-xs">
+                    <div className="min-w-0">
+                      <div className="font-bold text-[var(--ink)] truncate font-mono" dir="ltr">
+                        {config.fileName}
+                      </div>
+                      {config.originalUploadedName &&
+                        config.originalUploadedName !== config.fileName && (
+                          <div className="text-[10px] text-[var(--mute)] truncate">
+                            الملف الأصلي: {config.originalUploadedName}
+                          </div>
+                        )}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleResetAndReassignApk()}
+                      className="px-2.5 py-1 rounded-lg bg-rose-500/15 text-rose-700 dark:text-rose-300 hover:bg-rose-500/25 text-[11px] font-bold flex items-center gap-1 shrink-0 cursor-pointer"
+                    >
+                      <Trash2 className="w-3 h-3" />
+                      <span>حذف الملف</span>
+                    </button>
+                  </div>
+                )}
+
+                <label className="flex items-center gap-2 text-[11px] font-semibold text-[var(--ink)] cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={keepOfficialApkName}
+                    onChange={(e) => setKeepOfficialApkName(e.target.checked)}
+                    className="rounded accent-[#176b52]"
+                  />
+                  <span>
+                    تسمية الحزمة تلقائياً بالاسم الرسمي الموحد (
+                    <code className="font-mono text-[#176b52]">tidikelt-ai-release.apk</code>)
+                  </span>
+                </label>
+
+                <button
+                  type="button"
+                  disabled={isUploadingApk}
+                  onClick={() => fileInputRef.current?.click()}
+                  className="w-full py-3 px-4 rounded-xl border-2 border-dashed border-[#176b52]/50 bg-[var(--card)] hover:bg-[#176b52]/5 text-xs font-bold text-[#176b52] flex items-center justify-center gap-2 cursor-pointer transition-colors min-h-[48px]"
+                >
+                  {isUploadingApk ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <span className="tabular-nums">
+                        جاري رفع وتعيين الحزمة الجديدة... {uploadProgressPct}%
+                      </span>
+                    </>
+                  ) : (
+                    <>
+                      <Upload className="w-4 h-4" />
+                      <span>
+                        {config?.hasCustomUploadedApk
+                          ? 'استبدال وتعيين ملف .apk جديد من الأندرويد'
+                          : 'اختر ملف .apk من هاتفك الأندرويد لتعيينه الآن'}
+                      </span>
+                    </>
+                  )}
+                </button>
+
+                {isUploadingApk && (
+                  <progress
+                    value={uploadProgressPct}
+                    max={100}
+                    className="w-full h-2 rounded-full overflow-hidden accent-[#176b52]"
+                  />
+                )}
+              </div>
+            )}
+
+            {/* Mode 2: External Direct URL (Google Drive / GitHub / Direct) */}
             {formMode === 'external_url' && (
               <div className="p-3.5 rounded-xl bg-[var(--bg)] border border-[var(--line)] space-y-3">
                 <div>
-                  <label className="block text-xs font-bold text-[var(--ink)] mb-1">
-                    رابط ملف APK الخارجي (Google Drive أو GitHub Releases أو رابط مباشر):
-                  </label>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block text-xs font-bold text-[var(--ink)]">
+                      رابط ملف APK المباشر للأندرويد (Google Drive / GitHub / خادم خارجي):
+                    </label>
+                    {formExternalUrl && (
+                      <button
+                        type="button"
+                        onClick={() => setFormExternalUrl('')}
+                        className="text-[11px] text-rose-600 font-bold hover:underline cursor-pointer"
+                      >
+                        مسح الرابط
+                      </button>
+                    )}
+                  </div>
                   <input
                     type="url"
                     dir="ltr"
                     value={formExternalUrl}
                     onChange={(e) => setFormExternalUrl(e.target.value)}
-                    placeholder="https://drive.google.com/file/d/... أو https://.../app-release.apk"
+                    placeholder="https://drive.google.com/file/d/... أو https://.../tidikelt-ai.apk"
                     className="w-full px-3 py-2.5 rounded-xl border border-[var(--line)] bg-[var(--card)] text-[var(--ink)] text-xs font-mono focus:outline-none focus:border-[#176b52]"
                   />
                   <p className="text-[11px] text-[var(--mute)] mt-1.5 mb-0 leading-relaxed">
-                    💡 يمكنك لصق رابط مشاركة <b>Google Drive</b> العادي وسيقوم النظام تلقائياً بتحويله إلى رابط تنزيل مباشر فوري لجميع الهواتف.
+                    💡 عند لصق رابط مشاركة <b>Google Drive</b> أو <b>GitHub</b>، يقوم النظام بتحويله تلقائياً إلى رابط تنزيل APK مباشر لهواتف أندرويد.
                   </p>
                 </div>
 
@@ -804,7 +1189,7 @@ export const DownloadAppModal: React.FC<DownloadAppModalProps> = ({
                     <div className="flex items-center justify-between text-[11px] font-bold text-[#176b52]">
                       <span>
                         {normalizedPreview.isGoogleDrive
-                          ? '✓ تم تحويل رابط Google Drive إلى رابط تنزيل مباشر:'
+                          ? '✓ تم تحويل رابط Google Drive إلى تنزيل مباشر:'
                           : normalizedPreview.isDropbox
                           ? '✓ تم تحويل رابط Dropbox إلى تنزيل مباشر:'
                           : '✓ الرابط المباشر المعتمد للتنزيل:'}
@@ -830,58 +1215,15 @@ export const DownloadAppModal: React.FC<DownloadAppModalProps> = ({
               </div>
             )}
 
-            {/* Option B: Direct APK File Upload from Device */}
-            {formMode === 'uploaded_file' && (
-              <div className="p-3.5 rounded-xl bg-[var(--bg)] border border-[var(--line)] space-y-3">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold text-[var(--ink)] flex items-center gap-1.5">
-                    <FileArchive className="w-4 h-4 text-[#176b52]" />
-                    <span>رفع ملف APK الفعلي من جهازك:</span>
-                  </span>
-                  {config?.hasCustomUploadedApk && (
-                    <span className="text-[11px] font-bold text-[#176b52]">
-                      ✓ مرفوع حالياً ({config.fileSizeLabel})
-                    </span>
-                  )}
+            {/* Mode 3: Native Built-in Android WebAPK Mode */}
+            {formMode === 'android_webapk' && (
+              <div className="p-3.5 rounded-xl bg-[#176b52]/8 border border-[#176b52]/25 space-y-2">
+                <div className="flex items-center gap-1.5 text-xs font-extrabold text-[#176b52]">
+                  <Smartphone className="w-4 h-4 shrink-0" />
+                  <span>الحزمة المدمجة الرسمية لأندرويد (Tidikelt AI WebAPK)</span>
                 </div>
-
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept=".apk,application/vnd.android.package-archive"
-                  onChange={handleFileSelectUpload}
-                  className="hidden"
-                />
-
-                <button
-                  type="button"
-                  disabled={isUploadingApk}
-                  onClick={() => fileInputRef.current?.click()}
-                  className="w-full py-3 px-4 rounded-xl border-2 border-dashed border-[#176b52]/50 bg-[var(--card)] hover:bg-[#176b52]/5 text-xs font-bold text-[#176b52] flex items-center justify-center gap-2 cursor-pointer transition-colors min-h-[48px]"
-                >
-                  {isUploadingApk ? (
-                    <>
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                      <span className="tabular-nums">جاري رفع وفحص الحزمة... {uploadProgressPct}%</span>
-                    </>
-                  ) : (
-                    <>
-                      <Upload className="w-4 h-4" />
-                      <span>اختر ملف .apk من هاتفك أو حاسوبك لرفعه</span>
-                    </>
-                  )}
-                </button>
-
-                {isUploadingApk && (
-                  <progress
-                    value={uploadProgressPct}
-                    max={100}
-                    className="w-full h-2 rounded-full overflow-hidden accent-[#176b52]"
-                  />
-                )}
-
                 <p className="text-[11px] text-[var(--mute)] m-0 leading-relaxed">
-                  يتم التحقق تلقائياً من ترويسة حزمة الأندرويد (ZIP/APK Signature) لضمان عدم رفع ملف تالف أو ناقص.
+                  في هذا الوضع، يتم الاستغناء عن أي ملفات APK خارجية قديمة أو معطوبة، ويتم تعيين زر التحميل ليثبّت تطبيق <b>تيديكلت AI</b> الرسمي مباشرة على نظام أندرويد بأيقونته وهويته الكاملة.
                 </p>
               </div>
             )}
@@ -904,17 +1246,31 @@ export const DownloadAppModal: React.FC<DownloadAppModalProps> = ({
 
               <div>
                 <label className="block text-xs font-bold text-[var(--ink)] mb-1">
-                  حجم الملف المعروض:
+                  حجم الحزمة المعروض:
                 </label>
                 <input
                   type="text"
                   dir="ltr"
                   value={formSizeLabel}
                   onChange={(e) => setFormSizeLabel(e.target.value)}
-                  placeholder="24.5 MB"
+                  placeholder="18.4 MB"
                   className="w-full px-3 py-2 rounded-xl border border-[var(--line)] bg-[var(--bg)] text-[var(--ink)] text-xs font-mono focus:outline-none focus:border-[#176b52]"
                 />
               </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-[var(--ink)] mb-1">
+                اسم ملف الحزمة المعتمد للأندرويد:
+              </label>
+              <input
+                type="text"
+                dir="ltr"
+                value={formFileName}
+                onChange={(e) => setFormFileName(e.target.value)}
+                placeholder="tidikelt-ai-release.apk"
+                className="w-full px-3 py-2 rounded-xl border border-[var(--line)] bg-[var(--bg)] text-[var(--ink)] text-xs font-mono focus:outline-none focus:border-[#176b52]"
+              />
             </div>
 
             <div>
@@ -925,22 +1281,8 @@ export const DownloadAppModal: React.FC<DownloadAppModalProps> = ({
                 rows={2}
                 value={formReleaseNotes}
                 onChange={(e) => setFormReleaseNotes(e.target.value)}
-                placeholder="مثال: إصدار رسمي محدث يدعم رفيق الطريق ومستجدات عين صالح..."
+                placeholder="النسخة الرسمية لمنصة تيديكلت AI على أندرويد..."
                 className="w-full p-2.5 rounded-xl border border-[var(--line)] bg-[var(--bg)] text-[var(--ink)] text-xs focus:outline-none focus:border-[#176b52] resize-none"
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-bold text-[var(--ink)] mb-1">
-                رابط App Store للآيفون (اختياري):
-              </label>
-              <input
-                type="url"
-                dir="ltr"
-                value={formIosUrl}
-                onChange={(e) => setFormIosUrl(e.target.value)}
-                placeholder="https://apps.apple.com/app/..."
-                className="w-full px-3 py-2 rounded-xl border border-[var(--line)] bg-[var(--bg)] text-[var(--ink)] text-xs font-mono focus:outline-none focus:border-[#176b52]"
               />
             </div>
 
@@ -970,12 +1312,12 @@ export const DownloadAppModal: React.FC<DownloadAppModalProps> = ({
                 {isSavingConfig ? (
                   <>
                     <Loader2 className="w-4 h-4 animate-spin" />
-                    <span>جاري الحفظ...</span>
+                    <span>جاري الحفظ والتعيين...</span>
                   </>
                 ) : (
                   <>
                     <Check className="w-4 h-4" />
-                    <span>حفظ واعتماد إعدادات التحميل</span>
+                    <span>حفظ وتعيين إعدادات APK على أندرويد</span>
                   </>
                 )}
               </button>
