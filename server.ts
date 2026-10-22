@@ -42,14 +42,56 @@ import type { KnowledgeChunk, IndexedDocument } from './src/types.ts';
 
 dotenv.config();
 
+import rateLimit from 'express-rate-limit';
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
 const PORT = Number(process.env.PORT) || 3000;
 
-// High body limit to allow uploading images for multimodal analysis
-app.use(express.json({ limit: '25mb' }));
+// Controlled body limit to prevent memory exhaustion and DoS (6MB is ample for base64 images/PDFs)
+app.use(express.json({ limit: '6mb' }));
+
+// Master Admin Access Token Guard (Protected admin operations)
+export const ADMIN_TOKEN = process.env.ADMIN_TOKEN || '159159';
+
+export const requireAdmin = (req: Request, res: Response, next: Function) => {
+  const token = req.headers['x-admin-token'] || req.query.admin_token;
+  if (!token || String(token).trim() !== ADMIN_TOKEN) {
+    return res.status(401).json({
+      error: 'unauthorized',
+      message: 'غير مصرح: هذا الإجراء مخصص لإدارة المنصة ويتطلب رمز المشرف الإداري المعتمد (x-admin-token).',
+    });
+  }
+  next();
+};
+
+// Rate limiters to prevent API abuse, excessive cost, and resource exhaustion
+export const aiRateLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 30, // 30 requests per minute per IP
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'تم تجاوز الحد المسموح للطلبات الذكية في الدقيقة. يرجى الانتظار قليلاً.' },
+});
+
+export const heavyAiRateLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 10, // 10 heavy generation requests per minute per IP (TTS / Image)
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'تم تجاوز الحد المسموح للميزات الثقيلة (صور أو صوت). يرجى المحاولة بعد قليل.' },
+});
+
+// Centralized verified Gemini model constants
+export const PRIMARY_GEMINI_MODEL = 'gemini-2.5-flash';
+export const ADVANCED_GEMINI_MODEL = 'gemini-2.5-pro';
+export const SUPPORTED_GEMINI_MODELS = [
+  'gemini-2.5-flash',
+  'gemini-2.5-pro',
+  'gemini-flash-latest',
+];
 
 // Initialize Gemini SDK with User-Agent header as required
 const ai = new GoogleGenAI({
@@ -93,6 +135,7 @@ interface QueryLogItem {
   durationMs: number;
   type: 'text' | 'image' | 'pdf';
   preview: string;
+  isDemo?: boolean;
 }
 
 const DATA_DIR = path.join(__dirname, 'data');
@@ -155,6 +198,7 @@ function generateSeedStats(): QueryLogItem[] {
         durationMs: duration,
         type: queryType,
         preview: querySample,
+        isDemo: true,
       });
     }
   }
@@ -168,7 +212,7 @@ try {
   if (fs.existsSync(STATS_FILE)) {
     const raw = fs.readFileSync(STATS_FILE, 'utf-8');
     queryLogs = JSON.parse(raw);
-    if (!Array.isArray(queryLogs) || queryLogs.length < 200) {
+    if (!Array.isArray(queryLogs) || queryLogs.length < 50) {
       queryLogs = generateSeedStats();
       fs.writeFileSync(STATS_FILE, JSON.stringify(queryLogs, null, 2), 'utf-8');
     }
@@ -181,15 +225,19 @@ try {
   queryLogs = generateSeedStats();
 }
 
+let saveStatsTimer: NodeJS.Timeout | null = null;
 function saveQueryStats() {
-  try {
-    fs.writeFileSync(STATS_FILE, JSON.stringify(queryLogs, null, 2), 'utf-8');
-  } catch (err) {
-    console.error('Failed to save query stats to disk:', err);
-  }
+  if (saveStatsTimer) clearTimeout(saveStatsTimer);
+  saveStatsTimer = setTimeout(() => {
+    fs.promises.writeFile(STATS_FILE, JSON.stringify(queryLogs, null, 2), 'utf-8').catch((err) => {
+      console.error('Failed to save query stats to disk:', err);
+    });
+  }, 400);
 }
 
 function recordQuery(log: QueryLogItem) {
+  // Ensure genuine queries are never marked as demo
+  log.isDemo = false;
   queryLogs.push(log);
   if (queryLogs.length > 2000) {
     queryLogs = queryLogs.slice(-2000);
@@ -210,6 +258,7 @@ export interface ResponseRating {
   agentName?: string;
   timestamp: string; // ISO string
   createdAt: number;
+  isDemo?: boolean;
 }
 
 const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
@@ -228,6 +277,7 @@ function generateSeedRatings(): ResponseRating[] {
       comment: 'إجابة مباشرة وسريعة ساعدتني في قرار السفر.',
       agentId: 'desert',
       agentName: 'حارس الصحراء',
+      isDemo: true,
     },
     {
       messageId: 'seed_rate_2',
@@ -238,6 +288,7 @@ function generateSeedRatings(): ResponseRating[] {
       comment: 'الخطة ممتازة ومطابقة للمنهجية الأكاديمية.',
       agentId: 'research',
       agentName: 'الباحث الأكاديمي والمعرفي',
+      isDemo: true,
     },
     {
       messageId: 'seed_rate_3',
@@ -248,6 +299,7 @@ function generateSeedRatings(): ResponseRating[] {
       comment: 'معلومة صحيحة ومؤكدة.',
       agentId: 'doctor',
       agentName: 'طبيب الاستعجالات',
+      isDemo: true,
     },
     {
       messageId: 'seed_rate_4',
@@ -258,6 +310,7 @@ function generateSeedRatings(): ResponseRating[] {
       comment: 'أسعار مطابقة للواقع في السوق الأسبوعي.',
       agentId: 'market',
       agentName: 'دليل الأسواق والتمور',
+      isDemo: true,
     },
     {
       messageId: 'seed_rate_5',
@@ -267,6 +320,7 @@ function generateSeedRatings(): ResponseRating[] {
       reason: 'helpful_format',
       agentId: 'guide',
       agentName: 'المرشد المحلي',
+      isDemo: true,
     },
     {
       messageId: 'seed_rate_6',
@@ -277,6 +331,7 @@ function generateSeedRatings(): ResponseRating[] {
       comment: 'تفنيد سريع للإشاعة مع ذكر المصدر الأمني.',
       agentId: 'check',
       agentName: 'المدقق الإخباري',
+      isDemo: true,
     },
     {
       messageId: 'seed_rate_7',
@@ -286,6 +341,7 @@ function generateSeedRatings(): ResponseRating[] {
       reason: 'concise',
       agentId: 'guide',
       agentName: 'المرشد المحلي',
+      isDemo: true,
     },
     {
       messageId: 'seed_rate_8',
@@ -295,6 +351,7 @@ function generateSeedRatings(): ResponseRating[] {
       reason: 'concise',
       agentId: 'desert',
       agentName: 'حارس الصحراء',
+      isDemo: true,
     },
     {
       messageId: 'seed_rate_9',
@@ -305,6 +362,7 @@ function generateSeedRatings(): ResponseRating[] {
       comment: 'صياغة ممتازة جداً احترمت القواعد الإدارية الجزائرية.',
       agentId: 'fix',
       agentName: 'المصحح اللغوي',
+      isDemo: true,
     },
     {
       messageId: 'seed_rate_10',
@@ -315,6 +373,7 @@ function generateSeedRatings(): ResponseRating[] {
       comment: 'يُفضل ذكر التاريخ بدقة لأن توفر الوقود يتغير خلال عطلة نهاية الأسبوع.',
       agentId: 'market',
       agentName: 'دليل الأسواق والتمور',
+      isDemo: true,
     },
     {
       messageId: 'seed_rate_11',
@@ -325,6 +384,7 @@ function generateSeedRatings(): ResponseRating[] {
       comment: 'نصائح سلامة حيوية جداً.',
       agentId: 'desert',
       agentName: 'حارس الصحراء',
+      isDemo: true,
     },
     {
       messageId: 'seed_rate_12',
@@ -335,6 +395,7 @@ function generateSeedRatings(): ResponseRating[] {
       comment: 'أردت إجابة من جملة واحدة محددة دون سرد إضافي.',
       agentId: 'research',
       agentName: 'الباحث الأكاديمي والمعرفي',
+      isDemo: true,
     },
     {
       messageId: 'seed_rate_13',
@@ -345,6 +406,7 @@ function generateSeedRatings(): ResponseRating[] {
       comment: 'واضح ومباشر والتحذيرات الطبية صحيحة.',
       agentId: 'doctor',
       agentName: 'طبيب الاستعجالات',
+      isDemo: true,
     },
     {
       messageId: 'seed_rate_14',
@@ -354,6 +416,7 @@ function generateSeedRatings(): ResponseRating[] {
       reason: 'accurate',
       agentId: 'guide',
       agentName: 'المرشد المحلي',
+      isDemo: true,
     },
     {
       messageId: 'seed_rate_15',
@@ -363,6 +426,7 @@ function generateSeedRatings(): ResponseRating[] {
       reason: 'accurate',
       agentId: 'fix',
       agentName: 'المصحح اللغوي',
+      isDemo: true,
     },
   ];
 
@@ -371,6 +435,7 @@ function generateSeedRatings(): ResponseRating[] {
     ...s,
     timestamp: new Date(now - (idx * 1.5 * dayMs)).toISOString(),
     createdAt: now - (idx * 1.5 * dayMs),
+    isDemo: true,
   }));
 }
 
@@ -419,20 +484,26 @@ setInterval(() => {
   reloadRatingsFromDiskIfNeeded(false);
 }, RATINGS_POLL_INTERVAL_MS);
 
+let saveRatingsTimer: NodeJS.Timeout | null = null;
 function saveRatings() {
-  try {
-    fs.writeFileSync(RATINGS_FILE, JSON.stringify(ratings, null, 2), 'utf-8');
-    try {
-      lastRatingsMtime = fs.statSync(RATINGS_FILE).mtimeMs;
-    } catch {}
-  } catch (err) {
-    console.error('Failed to save ratings to disk:', err);
-  }
+  if (saveRatingsTimer) clearTimeout(saveRatingsTimer);
+  saveRatingsTimer = setTimeout(() => {
+    fs.promises.writeFile(RATINGS_FILE, JSON.stringify(ratings, null, 2), 'utf-8')
+      .then(() => {
+        try {
+          lastRatingsMtime = fs.statSync(RATINGS_FILE).mtimeMs;
+        } catch {}
+      })
+      .catch((err) => {
+        console.error('Failed to save ratings to disk:', err);
+      });
+  }, 400);
 }
 
 function getRatingsStats() {
   reloadRatingsFromDiskIfNeeded(false);
   const total = ratings.length;
+  const realRatings = ratings.filter((r) => !r.isDemo && !r.id.startsWith('seed_'));
   const likes = ratings.filter((r) => r.rating === 'like').length;
   const dislikes = ratings.filter((r) => r.rating === 'dislike').length;
   const satisfactionRate = total > 0 ? Math.round((likes / total) * 100) : 100;
@@ -470,6 +541,8 @@ function getRatingsStats() {
 
   return {
     total,
+    realCount: realRatings.length,
+    hasRealData: realRatings.length > 0,
     likes,
     dislikes,
     satisfactionRate,
@@ -479,30 +552,32 @@ function getRatingsStats() {
   };
 }
 
-// Injects dynamic System Context and Few-Shot Examples from data/ratings.json into the Gemini system prompt
+// Injects dynamic System Context and Few-Shot Examples ONLY from genuine, non-seed user ratings
 function generateRatingsFewShotAndContextPrompt(): string {
   reloadRatingsFromDiskIfNeeded(false);
-  if (ratings.length === 0) return '';
+  // STRICT AUDIT COMPLIANCE: Never inject synthetic/seed ratings into the prompt!
+  const realRatings = ratings.filter((r) => !r.isDemo && !r.id.startsWith('seed_'));
+  if (realRatings.length === 0) return '';
 
-  const total = ratings.length;
-  const likes = ratings.filter((r) => r.rating === 'like');
-  const dislikes = ratings.filter((r) => r.rating === 'dislike');
+  const total = realRatings.length;
+  const likes = realRatings.filter((r) => r.rating === 'like');
+  const dislikes = realRatings.filter((r) => r.rating === 'dislike');
   const satisfactionRate = total > 0 ? Math.round((likes.length / total) * 100) : 100;
 
-  // 1. Dynamic System Context (سياق نظامي مستخلص من التقييمات)
+  // 1. Dynamic System Context (سياق نظامي مستخلص حصراً من تقييمات المستخدمين الفعلية)
   let section = `\n\n════════════════════════════════════════════════════════════════
-🎯 سياق نظامي وأمثلة تدريبية مستخلصة من قاعدة التقييمات (data/ratings.json):
-• إجمالي تقييمات المستخدمين المحفوظة: ${total} تفاعل (نسبة الرضا الحالية: ${satisfactionRate}% 👍).
-• الهدف التوجيهي: الحفاظ على ثقة المستخدمين بنسبة 100% عبر الإيجاز الذكي، الدقة التامة، والدردشة المحترمة.
+🎯 سياق الجودة المستخلص من تقييمات المستخدمين الفعلية:
+• إجمالي التقييمات الواقعية المعتمدة: ${total} تفاعل (نسبة الرضا: ${satisfactionRate}% 👍).
+• الهدف التوجيهي: الحفاظ على الدقة التامة، الإيجاز وتفادي الحشو أو الردود غير المؤكدة.
 ════════════════════════════════════════════════════════════════`;
 
-  // 2. Few-Shot Positive Demonstrations (أمثلة نموذجية ناجحة معتمدة)
+  // 2. Few-Shot Positive Demonstrations (نماذج واقعية نالت استحسان المستخدم)
   const positiveExamples = likes
     .filter((r) => r.query && r.response && r.response.length > 5)
-    .slice(-4);
+    .slice(-3);
 
   if (positiveExamples.length > 0) {
-    section += `\n\n🌟 نماذج تدريبية ناجحة معتمدة (Few-Shot Positive Examples 👍):`;
+    section += `\n\n🌟 نماذج واقعية نالت رضا المستخدمين (Few-Shot Positive Examples 👍):`;
     positiveExamples.forEach((ex, idx) => {
       const reasonLabel =
         ex.reason === 'accurate'
@@ -516,20 +591,20 @@ function generateRatingsFewShotAndContextPrompt(): string {
           : 'رد نال رضا واستحسان السائل';
       const userFeedback = ex.comment ? ` | تعليق المستخدم: "${ex.comment}"` : '';
 
-      section += `\n\n[نموذج ناجح ${idx + 1} - ${reasonLabel}]:
+      section += `\n\n[نموذج واقعي ${idx + 1} - ${reasonLabel}]:
 - سؤال السائل: "${ex.query}"
 - الرد المعتمد: "${ex.response}"
 - معيار التميز: ${reasonLabel}${userFeedback}.`;
     });
   }
 
-  // 3. Negative Contrast Demonstrations (أمثلة على ما يجب تفاديه بناءً على التقييمات السلبية)
+  // 3. Negative Contrast Demonstrations (أمثلة على ما يجب تفاديه بناءً على التقييمات السلبية الفعلية)
   const negativeExamples = dislikes
     .filter((r) => r.query && (r.comment || r.reason))
     .slice(-3);
 
   if (negativeExamples.length > 0) {
-    section += `\n\n⚠️ حالات سابقة تم انتقادها لتجنبها بدقة (Few-Shot Negative Contrast 👎):`;
+    section += `\n\n⚠️ ملاحظات سلبية سابقة من المستخدمين لتجنبها بدقة (Few-Shot Negative Contrast 👎):`;
     negativeExamples.forEach((neg, idx) => {
       const critique =
         neg.reason === 'too_long'
@@ -550,7 +625,7 @@ function generateRatingsFewShotAndContextPrompt(): string {
     });
   }
 
-  section += `\n\n📌 توجيه إلزامي: طبّق هذه المعايير والأمثلة التدريبية تلقائياً في كل إجابة قادمة لضمان أعلى معايير الجودة والرضا.`;
+  section += `\n\n📌 توجيه إلزامي: طبّق هذه المعايير الواقعية تلقائياً في كل إجابة قادمة لضمان أعلى معايير الجودة والرضا.`;
   return section;
 }
 
@@ -762,22 +837,20 @@ function analyzeAndReconfirmQuery(rawQuery: string, language: string): {
   confirmedFallbackText: string;
 } {
   const original = (rawQuery || '').trim().replace(/\s+/g, ' ');
+
+  // Safe typo correction rules without breaking valid words (e.g. السوائل remains untouched)
   const typoRules: Array<[RegExp, string]> = [
-    [/السوائل|السول|السوال|السؤل/g, 'السؤال'],
+    [/(?:^|[\s،.؛!؟])(السول|السؤل|السوال)(?=[\s،.؛!؟]|$)/g, ' السؤال '],
     [/خورميات|خورزميات|خوارزميت/g, 'خوارزميات'],
     [/تيدكلت|تدكلت/g, 'تيديكلت'],
     [/اصطناعيي|الصطناعي|إصطناعي/g, 'اصطناعي'],
     [/برمجه/g, 'برمجة'],
-    [/خطاء|خطا\b/g, 'خطأ'],
-    [/تكد|تاكد|تأكذ/g, 'التأكد'],
+    [/(?:^|[\s،.؛!؟])(خطاء)(?=[\s،.؛!؟]|$)/g, ' خطأ '],
+    [/(?:^|[\s،.؛!؟])(تاكد|تأكذ)(?=[\s،.؛!؟]|$)/g, ' التأكد '],
     [/تعتمل/g, 'تعتمد'],
     [/اقتراحت/g, 'اقتراحات'],
     [/انا كان/g, 'إن كان'],
-    [/مطورها من|منو مطور| شكون طور|مين طور/g, 'من هو مطور'],
-    [/واش هو|وشنو هو|شنو هو|ماهو/g, 'ما هو'],
-    [/واش هي|وشنو هي|شنو هي|ماهي/g, 'ما هي'],
-    [/كيفاه|كيفاش/g, 'كيف'],
-    [/علاه|علاش/g, 'لماذا'],
+    [/مطورها من|منو مطور|شكون طور|مين طور/g, 'من هو مطور'],
   ];
 
   let normalized = original;
@@ -785,16 +858,13 @@ function analyzeAndReconfirmQuery(rawQuery: string, language: string): {
   for (const [pattern, replacement] of typoRules) {
     if (pattern.test(normalized)) {
       hasLinguisticErrors = true;
-      normalized = normalized.replace(pattern, replacement);
+      normalized = normalized.replace(pattern, replacement).replace(/\s+/g, ' ').trim();
     }
   }
 
-  // Only mark hasLinguisticErrors if actual spelling or grammatical errors were corrected
-  if (normalized.trim() !== original.trim()) {
+  if (normalized !== original) {
     hasLinguisticErrors = true;
   }
-
-  const baseTopic = normalized.replace(/^(ما هو|ما هي|كيف|اشرح|اريد|أريد|عن|حول)\s+/i, '').trim() || normalized;
 
   if (language === 'en') {
     return {
@@ -835,19 +905,20 @@ export function chooseRoute(question: string, selectedMode = 'auto'): 'direct' |
   return routed.mode === 'web' ? 'web' : 'direct';
 }
 
+// Word-boundary protected code intent detector (prevents false matches on decode, barcode, unicode, etc.)
 const CODE_HINTS =
-  /(كود|برمج|سكربت|دالة|رسم بياني|python|javascript|code|script|function|algorithm|regex|sql)/i;
+  /\b(python|javascript|typescript|script|function|algorithm|regex|sql)\b|(\bcode\b)|(?:^|[\s،.؛!؟])(كود|برمجة|سكربت|دالة|خوارزمية|رسم بياني)(?=[\s،.؛!؟]|$)/i;
 
 function detectTidikeltMode(prompt: string): Exclude<TidikeltMode, 'auto'> {
   if (CODE_HINTS.test(prompt)) return 'code';
   return chooseRoute(prompt, 'auto') === 'web' ? 'search' : 'chat';
 }
 
-function buildFallbackCodeExecution(queryText: string, customCode?: string): { code: string; codeOutput: string } {
+function buildFallbackCodeExecution(queryText: string, customCode?: string): { code: string; codeOutput: string; isSimulated?: boolean } {
   const q = queryText.trim();
   const codeToInspect = (customCode || q).trim();
 
-  // Check if customCode contains radius assignment like `radius = 12`
+  // Basic deterministic math formula calculation (clear arithmetic output)
   const radiusVarMatch = codeToInspect.match(/radius\s*=\s*(\d+(?:\.\d+)?)/i);
   if (radiusVarMatch) {
     const r = Number(radiusVarMatch[1]);
@@ -861,7 +932,6 @@ function buildFallbackCodeExecution(queryText: string, customCode?: string): { c
     };
   }
 
-  // Check if customCode contains a = X and b = Y assignments
   const aVarMatch = codeToInspect.match(/\ba\s*=\s*(-?\d+(?:\.\d+)?)/);
   const bVarMatch = codeToInspect.match(/\bb\s*=\s*(-?\d+(?:\.\d+)?)/);
   const opVarMatch = codeToInspect.match(/\bresult\s*=\s*a\s*([\+\-\*\/])\s*b/);
@@ -873,7 +943,7 @@ function buildFallbackCodeExecution(queryText: string, customCode?: string): { c
     return {
       code:
         customCode ||
-        `# تنفيذ العملية الحسابية في Python\na = ${a}\nb = ${b}\nresult = a ${op} b\nprint(f"{a} ${op} {b} = {result}")`,
+        `# حساب مباشر\na = ${a}\nb = ${b}\nresult = a ${op} b\nprint(f"{a} ${op} {b} = {result}")`,
       codeOutput: `${a} ${op} ${b} = ${res}`,
     };
   }
@@ -900,7 +970,7 @@ function buildFallbackCodeExecution(queryText: string, customCode?: string): { c
     return {
       code:
         customCode ||
-        `# تنفيذ العملية الحسابية في Python\na = ${a}\nb = ${b}\nresult = a ${op} b\nprint(f"{a} ${op} ${b} = {result}")`,
+        `# حساب مباشر\na = ${a}\nb = ${b}\nresult = a ${op} b\nprint(f"{a} ${op} {b} = {result}")`,
       codeOutput: `${a} ${op} ${b} = ${res}`,
     };
   }
@@ -916,18 +986,20 @@ function buildFallbackCodeExecution(queryText: string, customCode?: string): { c
     }
     return {
       code: customCode,
-      codeOutput: `[STDOUT] تم تنفيذ الكود بنجاح (${customCode.split('\n').length} أسطر برمجية) — التوقيت: ${new Date().toLocaleTimeString('ar-DZ', { hour12: false })}`,
+      codeOutput: `تعذّر تشغيل الكود في بيئة الحوسبة السحابية حالياً (البيئة غير متاحة أو تم تجاوز الحصة المخصصة). يمكنك نسخ الكود وتشغيله محلياً في بيئة Python.`,
+      isSimulated: false,
     };
   }
 
   return {
-    code: `# سكربت بايثون تنفيذي - تيديكلت Ai\ndef solve_task():\n    task = ${JSON.stringify(q.slice(0, 80))}\n    print(f"تم تنفيذ المعالجة البرمجية بنجاح للمهمة: {task}")\n\nsolve_task()`,
-    codeOutput: `تم تنفيذ المعالجة البرمجية بنجاح للمهمة: ${q.slice(0, 80)}`,
+    code: `# سكربت بايثون للمهمة المطلوبة\ndef run():\n    # كود تنفيذي محلي\n    pass\n\nrun()`,
+    codeOutput: `تعذّر تشغيل الكود في بيئة الحوسبة السحابية حالياً. تم استخراج الكود أعلاه للمعاينة والتشغيل في بيئتك البرمجية المحلية.`,
+    isSimulated: false,
   };
 }
 
 // Dedicated endpoint for direct askTidikelt(prompt, options) service calls
-app.post('/api/tidikelt/ask', async (req: Request, res: Response) => {
+app.post('/api/tidikelt/ask', aiRateLimiter, async (req: Request, res: Response) => {
   const startedAt = performance.now();
   const timings: Record<string, number> = {};
 
@@ -1100,7 +1172,7 @@ app.post('/api/tidikelt/ask', async (req: Request, res: Response) => {
 });
 
 // Dedicated endpoint for Ain Salah AI agents
-app.post('/api/ain-salah/ask', async (req: Request, res: Response) => {
+app.post('/api/ain-salah/ask', aiRateLimiter, async (req: Request, res: Response) => {
   const requestStartTime = Date.now();
   const startedAt = performance.now();
   const timings: Record<string, number> = {};
@@ -1211,8 +1283,20 @@ app.post('/api/ain-salah/ask', async (req: Request, res: Response) => {
     const recentFixes = Array.isArray(fixes)
       ? fixes.slice(-8).map((f: string) => `- ${f}`).join('\n')
       : '';
+    // Consistent history normalization: accepts [user, model] pairs AND {role, text|content} objects
     const recentHistory = Array.isArray(history)
-      ? history.slice(-3).map((h: any) => `س: ${h[0]}\nج: ${h[1]}`).join('\n\n')
+      ? history
+          .slice(-4)
+          .map((h: any) => {
+            if (Array.isArray(h)) return `س: ${h[0]}\nج: ${h[1]}`;
+            if (h && typeof h === 'object') {
+              const roleName = h.role === 'model' || h.role === 'assistant' ? 'ج' : 'س';
+              return `${roleName}: ${h.text || h.content || ''}`;
+            }
+            return '';
+          })
+          .filter(Boolean)
+          .join('\n\n')
       : '';
 
     const isWeatherOrTravelQuery =
@@ -1330,17 +1414,9 @@ ${ragContextPrompt}`;
     });
 
     let response: any;
-    let usedModel = 'gemini-3.8-flash';
+    let usedModel = PRIMARY_GEMINI_MODEL;
     // Prioritize active Gemini models with immediate automatic failover
-    const candidateModels = [
-      'gemini-3.8-flash',
-      'gemini-3.6-flash',
-      'gemini-3.5-flash',
-      'gemini-3.5-flash-lite',
-      'gemini-3-flash-preview',
-      'gemini-3.1-flash-lite',
-      'gemini-flash-latest',
-    ];
+    const candidateModels = SUPPORTED_GEMINI_MODELS;
 
     const nowMs = Date.now();
     const isTransientModelError = (err: any): boolean => {
@@ -1404,6 +1480,7 @@ ${ragContextPrompt}`;
               break;
             }
           } catch (err: any) {
+            console.warn(`[Model Attempt Failed] ${modelCandidate} (codeExecution):`, err?.message || err);
             if (isTransientModelError(err)) {
               modelCooldownUntil[modelCandidate] = Date.now() + 30_000;
               continue;
@@ -1432,6 +1509,7 @@ ${ragContextPrompt}`;
               break;
             }
           } catch (err: any) {
+            console.warn(`[Model Attempt Failed] ${modelCandidate} (search):`, err?.message || err);
             if (isTransientModelError(err)) {
               googleSearchCooldownUntil = Date.now() + 60_000;
               modelCooldownUntil[modelCandidate] = Date.now() + 30_000;
@@ -1459,6 +1537,7 @@ ${ragContextPrompt}`;
             break;
           }
         } catch (fallbackErr: any) {
+          console.warn(`[Model Attempt Failed] ${modelCandidate} (direct):`, fallbackErr?.message || fallbackErr);
           if (isTransientModelError(fallbackErr)) {
             modelCooldownUntil[modelCandidate] = Date.now() + 30_000;
           }
@@ -1499,7 +1578,7 @@ ${ragContextPrompt}`;
         }
         if (resolvedMode === 'code') {
           const fbCode = buildFallbackCodeExecution(q);
-          return `تم تنفيذ الكود البرمجي بنجاح. النتيجة: \`${fbCode.codeOutput.replace(/\n/g, ' | ')}\``;
+          return fbCode.codeOutput;
         }
         const sftMatch = getSftDataset().find(
           (item) => item.query && (q.includes(item.query.slice(0, 18)) || item.query.includes(q.slice(0, 18)))
@@ -1533,7 +1612,7 @@ ${ragContextPrompt}`;
         return queryReconfirmation.confirmedFallbackText;
       })();
 
-      response = { text: fallbackCleanText };
+      response = { text: fallbackCleanText, isFallback: true };
     }
 
     // Extract deduplicated live web search grounding metadata (sources & queries) and executableCode / codeExecutionResult
@@ -1577,22 +1656,26 @@ ${ragContextPrompt}`;
     let finalAgent = fallbackAgent;
     let routingReason = '';
 
-    try {
-      const jsonMatch = rawText.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        const parsed = JSON.parse(jsonMatch[0]);
-        if (parsed.text) finalText = parsed.text;
-        if (parsed.assignedAgent && parsed.assignedAgent.name) {
-          finalAgent = {
-            id: parsed.assignedAgent.id || fallbackAgent.id,
-            name: parsed.assignedAgent.name || fallbackAgent.name,
-            emoji: parsed.assignedAgent.emoji || fallbackAgent.emoji,
-          };
-          routingReason = parsed.assignedAgent.reason || '';
+    // Safe JSON parsing: ONLY attempt parsing if response explicitly is an assignedAgent JSON packet
+    // This completely prevents corrupting markdown or code containing brackets {}
+    if (rawText.trim().startsWith('```json') || (rawText.trim().startsWith('{') && rawText.includes('"assignedAgent"'))) {
+      try {
+        const jsonMatch = rawText.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          const parsed = JSON.parse(jsonMatch[0]);
+          if (parsed.text) finalText = parsed.text;
+          if (parsed.assignedAgent && parsed.assignedAgent.name) {
+            finalAgent = {
+              id: parsed.assignedAgent.id || fallbackAgent.id,
+              name: parsed.assignedAgent.name || fallbackAgent.name,
+              emoji: parsed.assignedAgent.emoji || fallbackAgent.emoji,
+            };
+            routingReason = parsed.assignedAgent.reason || '';
+          }
         }
+      } catch {
+        finalText = rawText.replace(/^```json\s*/, '').replace(/\s*```$/, '').trim();
       }
-    } catch {
-      finalText = rawText.replace(/^```json\s*/, '').replace(/\s*```$/, '').trim();
     }
 
     // Ensure code mode always populates executedCode / executedCodeOutput if not returned as separate part
@@ -1625,11 +1708,14 @@ ${ragContextPrompt}`;
         durationMs,
         type: pdf ? 'pdf' : (image ? 'image' : 'text'),
         preview: effectiveQuery.slice(0, 80),
+        isDemo: false,
       };
       recordQuery(queryLog);
     } catch (logErr) {
       console.error('Failed to log query stats:', logErr);
     }
+
+    const isFallbackResponse = Boolean(response?.isFallback);
 
     return res.json({
       text: finalText,
@@ -1645,23 +1731,26 @@ ${ragContextPrompt}`;
       webSources: webSources.slice(0, 6),
       groundingQueries: groundingQueries.slice(0, 4),
       sourceInfo: {
-        engine: 'Google Gemini',
-        model: usedModel,
-        isGrounded: webSources.length > 0 || groundingQueries.length > 0,
-        provider:
-          resolvedMode === 'code'
-            ? 'Google Gemini (Code Execution)'
-            : resolvedMode === 'search'
-            ? 'Google Gemini (Google Search Grounding)'
-            : 'Google Gemini (Direct Chat)',
-        badgeTitle:
-          resolvedMode === 'code'
-            ? 'وضع تنفيذ الكود البرمجي الفعلي: Google Gemini · Code Execution'
-            : isResearchQuery
-            ? 'مساعد بحثي متقدم: Google Gemini · بحث معمق وهيكل شجري'
-            : isTemporalQuery
-            ? 'مصدر معتمد: Google Gemini · توقيت وساعة حية'
-            : 'إجابة مباشرة وموجزة: Google Gemini · خالية من الحشو',
+        engine: isFallbackResponse ? 'ذاكرة النظام المحلية (Offline Fallback)' : 'Google Gemini',
+        model: isFallbackResponse ? 'local-fallback' : usedModel,
+        isGrounded: !isFallbackResponse && (webSources.length > 0 || groundingQueries.length > 0),
+        isFallback: isFallbackResponse,
+        provider: isFallbackResponse
+          ? 'ذاكرة النظام المحلية ومكتبة المعرفة'
+          : resolvedMode === 'code'
+          ? 'Google Gemini (Code Execution)'
+          : resolvedMode === 'search'
+          ? 'Google Gemini (Google Search Grounding)'
+          : 'Google Gemini (Direct Chat)',
+        badgeTitle: isFallbackResponse
+          ? 'إجابة من ذاكرة النظام الاحتياطية'
+          : resolvedMode === 'code'
+          ? 'وضع تنفيذ الكود البرمجي الفعلي: Google Gemini · Code Execution'
+          : isResearchQuery
+          ? 'مساعد بحثي متقدم: Google Gemini · بحث معمق وهيكل شجري'
+          : isTemporalQuery
+          ? 'مصدر معتمد: Google Gemini · توقيت وساعة حية'
+          : 'إجابة مباشرة وموجزة: Google Gemini · خالية من الحشو',
         isLiveTemporal: isTemporalQuery,
         isResearchMode: isResearchQuery,
         isSystemsEngineerMode: true,
@@ -1675,7 +1764,7 @@ ${ragContextPrompt}`;
           year: liveTemporal.currentYear,
         },
       },
-      multiModelEngines: ['Google Gemini (بحث حي مباشر)', 'Gemini Flash 3.8', 'Google Search & Code Execution'],
+      multiModelEngines: ['Google Gemini (بحث حي مباشر)', 'Gemini Flash 2.5', 'Google Search & Code Execution'],
       pipelineExecution,
     });
   } catch (error: any) {
@@ -1838,7 +1927,7 @@ app.get('/api/ain-salah/stats', (_req: Request, res: Response) => {
   }
 });
 
-app.post('/api/ain-salah/stats/reset', (_req: Request, res: Response) => {
+app.post('/api/ain-salah/stats/reset', requireAdmin, (_req: Request, res: Response) => {
   try {
     queryLogs = generateSeedStats();
     saveQueryStats();
@@ -1873,6 +1962,7 @@ app.post('/api/ratings', (req: Request, res: Response) => {
       agentName: agentName || existing?.agentName || 'المساعد الذكي',
       timestamp: new Date().toISOString(),
       createdAt: existing ? existing.createdAt : Date.now(),
+      isDemo: false,
     };
 
     if (existingIndex >= 0) {
@@ -1895,7 +1985,7 @@ app.post('/api/ratings', (req: Request, res: Response) => {
   }
 });
 
-app.delete('/api/ratings/:messageId', (req: Request, res: Response) => {
+app.delete('/api/ratings/:messageId', requireAdmin, (req: Request, res: Response) => {
   try {
     const { messageId } = req.params;
     const initialLen = ratings.length;
@@ -1914,11 +2004,30 @@ app.delete('/api/ratings/:messageId', (req: Request, res: Response) => {
   }
 });
 
-app.get('/api/ratings', (_req: Request, res: Response) => {
+app.get('/api/ratings', (req: Request, res: Response) => {
   try {
+    const token = req.headers['x-admin-token'] || req.query.admin_token;
+    const isOwner = token === ADMIN_TOKEN;
+    const stats = getRatingsStats();
+
+    // Privacy protection: Visitors see high-level statistics; individual comments/queries are reserved for authorized admin
+    if (!isOwner) {
+      return res.json({
+        ratings: ratings.slice(-30).map((r) => ({
+          id: r.id,
+          rating: r.rating,
+          reason: r.reason,
+          agentId: r.agentId,
+          agentName: r.agentName,
+          timestamp: r.timestamp,
+        })),
+        stats,
+      });
+    }
+
     return res.json({
       ratings: ratings.slice(-100).reverse(),
-      stats: getRatingsStats(),
+      stats,
     });
   } catch (err: any) {
     console.error('Error in GET /api/ratings:', err);
@@ -1935,7 +2044,7 @@ app.get('/api/ratings/stats', (_req: Request, res: Response) => {
   }
 });
 
-app.post('/api/ratings/reset', (_req: Request, res: Response) => {
+app.post('/api/ratings/reset', requireAdmin, (_req: Request, res: Response) => {
   try {
     ratings = generateSeedRatings();
     saveRatings();
@@ -1950,7 +2059,7 @@ app.post('/api/ratings/reset', (_req: Request, res: Response) => {
   }
 });
 
-app.post('/api/ratings/reload', (_req: Request, res: Response) => {
+app.post('/api/ratings/reload', requireAdmin, (_req: Request, res: Response) => {
   try {
     const reloaded = reloadRatingsFromDiskIfNeeded(true);
     return res.json({
@@ -1989,7 +2098,7 @@ app.get('/api/training/sft', (_req: Request, res: Response) => {
   }
 });
 
-app.post('/api/training/sft', (req: Request, res: Response) => {
+app.post('/api/training/sft', requireAdmin, (req: Request, res: Response) => {
   try {
     const { query, response, category, source, tags, qualityScore } = req.body;
     if (!query || !response) {
@@ -2016,7 +2125,7 @@ app.post('/api/training/sft', (req: Request, res: Response) => {
   }
 });
 
-app.delete('/api/training/sft/:id', (req: Request, res: Response) => {
+app.delete('/api/training/sft/:id', requireAdmin, (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const ok = deleteSftExample(id);
@@ -2066,7 +2175,7 @@ app.post('/api/training/rlhf/generate-pair', async (req: Request, res: Response)
 
     // Generate Candidate A (Focused, polite, structured)
     const genA = ai.models.generateContent({
-      model: 'gemini-3.1-flash-lite',
+      model: PRIMARY_GEMINI_MODEL,
       contents: p,
       config: {
         systemInstruction:
@@ -2077,7 +2186,7 @@ app.post('/api/training/rlhf/generate-pair', async (req: Request, res: Response)
 
     // Generate Candidate B (Alternative style, slightly more creative/descriptive)
     const genB = ai.models.generateContent({
-      model: 'gemini-3.1-flash-lite',
+      model: PRIMARY_GEMINI_MODEL,
       contents: p,
       config: {
         systemInstruction:
@@ -2155,7 +2264,7 @@ app.get('/api/rag/knowledge-base', (_req: Request, res: Response) => {
   }
 });
 
-app.post('/api/rag/knowledge-base', (req: Request, res: Response) => {
+app.post('/api/rag/knowledge-base', requireAdmin, (req: Request, res: Response) => {
   try {
     const { title, content, category, source, tags, importance } = req.body;
     if (!title || !content) {
@@ -2181,7 +2290,7 @@ app.post('/api/rag/knowledge-base', (req: Request, res: Response) => {
   }
 });
 
-app.delete('/api/rag/knowledge-base/:id', (req: Request, res: Response) => {
+app.delete('/api/rag/knowledge-base/:id', requireAdmin, (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const ok = deleteKnowledgeChunk(id);
@@ -2220,7 +2329,7 @@ app.get('/api/rag/documents', (_req: Request, res: Response) => {
 });
 
 // Delete an entire document and its indexed chunks
-app.delete('/api/rag/documents/:docId', (req: Request, res: Response) => {
+app.delete('/api/rag/documents/:docId', requireAdmin, (req: Request, res: Response) => {
   try {
     const { docId } = req.params;
     const deletedCount = deleteDocumentChunks(decodeURIComponent(docId));
@@ -2235,7 +2344,7 @@ app.delete('/api/rag/documents/:docId', (req: Request, res: Response) => {
 });
 
 // Upload and index custom documents (PDF, Markdown, Text, CSV)
-app.post('/api/rag/upload-document', async (req: Request, res: Response) => {
+app.post('/api/rag/upload-document', requireAdmin, async (req: Request, res: Response) => {
   try {
     const {
       fileName = 'document.txt',
@@ -2423,7 +2532,7 @@ Return ONLY valid JSON (no markdown formatting, no code fences):
   }
 });
 
-app.post('/api/rag/knowledge-base/batch', (req: Request, res: Response) => {
+app.post('/api/rag/knowledge-base/batch', requireAdmin, (req: Request, res: Response) => {
   try {
     const { chunks = [] } = req.body || {};
     if (!Array.isArray(chunks) || chunks.length === 0) {
@@ -2491,7 +2600,7 @@ app.get('/api/training/agent-avatars', (_req: Request, res: Response) => {
   }
 });
 
-app.post('/api/training/agent-avatars', (req: Request, res: Response) => {
+app.post('/api/training/agent-avatars', requireAdmin, (req: Request, res: Response) => {
   try {
     const { agentId, avatarUrl } = req.body;
     if (!agentId || typeof agentId !== 'string') {
@@ -2514,7 +2623,7 @@ app.post('/api/training/agent-avatars', (req: Request, res: Response) => {
   }
 });
 
-app.delete('/api/training/agent-avatars/:agentId', (req: Request, res: Response) => {
+app.delete('/api/training/agent-avatars/:agentId', requireAdmin, (req: Request, res: Response) => {
   try {
     const { agentId } = req.params;
     const avatars = loadAgentAvatars();
@@ -2858,10 +2967,10 @@ async function handleChatStream(req: Request, res: Response) {
   }
 }
 
-app.post('/api/chat/stream', handleChatStream);
+app.post('/api/chat/stream', aiRateLimiter, handleChatStream);
 
 // Chat API endpoint adhering to Tidikelt AI direct-answering guidelines
-app.post('/api/chat', async (req: Request, res: Response) => {
+app.post('/api/chat', aiRateLimiter, async (req: Request, res: Response) => {
   if (
     req.body?.stream === true ||
     req.headers.accept?.includes('text/event-stream') ||
@@ -3010,12 +3119,10 @@ app.post('/api/chat', async (req: Request, res: Response) => {
 
     const replyStyle = resolvedStyle || 'ar';
     const stylePrompt = resolvedStyle ? getStyleInstruction(resolvedStyle) : '';
-    const systemPromptToUse = String(
-      req.body.systemInstruction ||
-        `${makeSystemPrompt(replyStyle).trim()}\n- عند توفر مصادر مرفقة، اعتمد عليها بدقة وأضف رقم المصدر مثل [1].${
-          stylePrompt ? `\n\n${stylePrompt}` : ''
-        }`
-    );
+    // Audit protection: Client never overrides server system prompt. Fixed system instruction enforced.
+    const systemPromptToUse = `${makeSystemPrompt(replyStyle).trim()}\n- عند توفر مصادر مرفقة، اعتمد عليها بدقة وأضف رقم المصدر مثل [1].${
+      stylePrompt ? `\n\n${stylePrompt}` : ''
+    }`;
 
     const messages = [
       { role: 'system', content: systemPromptToUse },
@@ -3032,16 +3139,10 @@ app.post('/api/chat', async (req: Request, res: Response) => {
     ];
 
     const stream = Boolean(req.body.stream);
-    const temperature = Number(req.body.temperature) || 0.3;
+    // Audit protection: Strict server-enforced temperature 0.3 (ignores client parameter)
+    const temperature = 0.3;
 
-    const candidateModels = [
-      'gemini-3.8-flash',
-      'gemini-3.6-flash',
-      'gemini-3.5-flash',
-      'gemini-3.5-flash-lite',
-      'gemini-3-flash-preview',
-      'gemini-3.1-flash-lite',
-    ];
+    const candidateModels = SUPPORTED_GEMINI_MODELS;
 
     if (stream) {
       res.setHeader('Content-Type', 'text/event-stream');
@@ -3070,7 +3171,8 @@ app.post('/api/chat', async (req: Request, res: Response) => {
             }
             streamed = true;
             break;
-          } catch {
+          } catch (err: any) {
+            console.warn(`[Gemini streaming error for ${mCandidate}]:`, err?.message || err);
             modelCooldownUntil[mCandidate] = Date.now() + 30_000;
           }
         }
@@ -3134,6 +3236,7 @@ app.post('/api/chat', async (req: Request, res: Response) => {
               break;
             }
           } catch (genErr: any) {
+            console.warn(`[Gemini generate error for ${mCandidate}]:`, genErr?.message || genErr);
             modelCooldownUntil[mCandidate] = Date.now() + 30_000;
           }
         }
@@ -3209,7 +3312,7 @@ app.post('/api/chat', async (req: Request, res: Response) => {
 });
 
 // Text-to-Speech Endpoint using gemini-3.8-flash-lite-tts
-app.post('/api/tts', async (req: Request, res: Response) => {
+app.post('/api/tts', heavyAiRateLimiter, async (req: Request, res: Response) => {
   try {
     const { text, voice = 'Kore' } = req.body;
 
@@ -3259,7 +3362,7 @@ app.post('/api/tts', async (req: Request, res: Response) => {
 });
 
 // Studio Prompt Specialized Tool Executor
-app.post('/api/tool-execute', async (req: Request, res: Response) => {
+app.post('/api/tool-execute', aiRateLimiter, async (req: Request, res: Response) => {
   try {
     const { tool, input, options } = req.body;
 
@@ -3298,9 +3401,9 @@ app.post('/api/tool-execute', async (req: Request, res: Response) => {
     }
 
     const activeModel =
-      (modelCooldownUntil['gemini-3.8-flash'] || 0) > Date.now()
-        ? 'gemini-3.1-flash-lite'
-        : 'gemini-3.8-flash';
+      (modelCooldownUntil[PRIMARY_GEMINI_MODEL] || 0) > Date.now()
+        ? 'gemini-flash-latest'
+        : PRIMARY_GEMINI_MODEL;
 
     const response = await ai.models.generateContent({
       model: activeModel,
@@ -3341,13 +3444,14 @@ app.get('/api/ain-salah/documentation', (_req: Request, res: Response) => {
     ],
     emergencyDirectory: {
       verifiedAt: '2026-03',
-      officialAuthority: 'المديرية العامة للأمن الوطني (DGSN) والمديرية العامة للحماية المدنية وقيادة الدرك الوطني',
+      officialAuthority: 'المديرية العامة للأمن الوطني (DGSN) والمديرية العامة للحماية المدنية وقيادة الدرك الوطني والهيئة الوطنية لحماية وترقية الطفولة (ONPPE)',
       numbers: {
         civilProtection: { number: '14', description: 'الحماية المدنية (الإسعاف، الإطفاء، حوادث المرور)' },
         gendarmerie: { number: '1055', description: 'الدرك الوطني (أمان الطرق السريعة RN1 والمسالك الصحراوية)' },
         policeSecours: { number: '17', description: 'شرطة النجدة الحضرية (التدخل السريع في الوسط الحضري)' },
         policeGreenLine: { number: '1548', description: 'الرقم الأخضر الوطني المجاني للمديرية العامة للأمن الوطني DGSN' },
-        childProtection: { number: '104', description: 'الخط الأخضر لحماية الطفولة والفئات الهشة' },
+        childProtection: { number: '111', description: 'الرقم الأخضر الوطني للهيئة الوطنية لحماية وترقية الطفولة (ONPPE)' },
+        childAbductionAlert: { number: '104', description: 'رقم الإنذار باختطاف أو اختفاء الأطفال (المديرية العامة للأمن الوطني DGSN)' },
       },
     },
     endpoints: [
@@ -3475,10 +3579,8 @@ async function searchWeb(
   try {
     const kbMatches = searchKnowledgeBase(query, 5);
     for (const match of kbMatches) {
-      const srcUrl =
-        match.chunk.source && /^https?:\/\//i.test(match.chunk.source)
-          ? match.chunk.source
-          : `https://tidikelt-ai.local/docs/${encodeURIComponent(match.chunk.id || 'kb')}`;
+      const isHttp = match.chunk.source && /^https?:\/\//i.test(match.chunk.source);
+      const srcUrl = isHttp ? match.chunk.source : '';
 
       results.push({
         title: match.chunk.title || 'مصدر تيديكلت AI المعتمد',
@@ -3492,7 +3594,7 @@ async function searchWeb(
 
   // 2. البحث الحي المباشر عبر Google Search Grounding إن كان الوقت متاحاً
   if (Date.now() > googleSearchCooldownUntil && !signal?.aborted) {
-    for (const modelCandidate of ['gemini-3.8-flash', 'gemini-3.6-flash', 'gemini-3.5-flash']) {
+    for (const modelCandidate of SUPPORTED_GEMINI_MODELS) {
       if ((modelCooldownUntil[modelCandidate] || 0) > Date.now()) continue;
       try {
         const searchPromise = ai.models.generateContent({
@@ -3511,13 +3613,19 @@ async function searchWeb(
         const candidate = searchResp.candidates?.[0];
         const gMetadata = candidate?.groundingMetadata;
         if (gMetadata && Array.isArray(gMetadata.groundingChunks)) {
-          for (const chunk of gMetadata.groundingChunks) {
-            const web = (chunk as any).web;
+          for (let i = 0; i < gMetadata.groundingChunks.length; i++) {
+            const chunk = gMetadata.groundingChunks[i] as any;
+            const web = chunk?.web;
             if (web && web.uri) {
+              // Extract distinct snippet per source rather than cloning the candidate text
+              const distinctSnippet =
+                (chunk.text && typeof chunk.text === 'string' && chunk.text.trim()) ||
+                (web.title ? `مصدر بحث معتمد: ${web.title}` : 'مصدر بحث Google المعتمد');
+
               results.push({
                 title: web.title || 'مصدر بحث Google',
                 url: web.uri,
-                snippet: candidate.content?.parts?.[0]?.text?.slice(0, 300) || web.title || 'نتيجة بحث موثقة',
+                snippet: distinctSnippet,
               });
             }
           }
@@ -3539,9 +3647,10 @@ async function searchWeb(
     );
     if (kbAll.length > 0) {
       for (const k of kbAll.slice(0, 3)) {
+        const isHttp = k.source && /^https?:\/\//i.test(k.source);
         results.push({
           title: k.title || 'مصدر معرفي معتمد',
-          url: `https://tidikelt-ai.local/docs/${encodeURIComponent(k.id)}`,
+          url: isHttp ? k.source : '',
           snippet: k.content.slice(0, 250),
         });
       }
@@ -3975,7 +4084,7 @@ app.post('/api/search', async (req: Request, res: Response) => {
 });
 
 // --- High-Quality Image Generation Studio (Imagen 3 / Nano Banana) ---
-app.post('/api/generate-image', async (req: Request, res: Response) => {
+app.post('/api/generate-image', heavyAiRateLimiter, async (req: Request, res: Response) => {
   const prompt = typeof req.body?.prompt === 'string' ? req.body.prompt.trim() : '';
   const aspectRatio = req.body?.aspectRatio || '1:1';
 
@@ -4023,7 +4132,7 @@ app.post('/api/generate-image', async (req: Request, res: Response) => {
 });
 
 // --- Google Maps & Live Search Grounding Endpoint ---
-app.post('/api/maps-grounding', async (req: Request, res: Response) => {
+app.post('/api/maps-grounding', aiRateLimiter, async (req: Request, res: Response) => {
   const startedAt = performance.now();
   const timings: Record<string, number> = {};
 
@@ -4058,7 +4167,7 @@ app.post('/api/maps-grounding', async (req: Request, res: Response) => {
     await measure('modelMs', async () => {
       try {
         response = await runtimeAi.models.generateContent({
-          model: 'gemini-3.8-flash',
+          model: PRIMARY_GEMINI_MODEL,
           contents: `أنت الدليل الجغرافي والميداني الموثق لولاية عين صالح ومنطقة تديكلت والجزائر. أجب بدقة ووضوح باللغة العربية حول: ${queryText}`,
           config: {
             // Note: googleMaps cannot be combined with googleSearch in the same request
@@ -4075,7 +4184,7 @@ app.post('/api/maps-grounding', async (req: Request, res: Response) => {
         });
       } catch {
         response = await runtimeAi.models.generateContent({
-          model: 'gemini-3.8-flash',
+          model: PRIMARY_GEMINI_MODEL,
           contents: `أنت الدليل الجغرافي والميداني الموثق لولاية عين صالح ومنطقة تديكلت (الإحداثيات المرجعية: ${latitude}, ${longitude}). أجب بدقة ووضوح باللغة العربية حول: ${queryText}`,
           config: {
             tools: [{ googleSearch: {} }],
@@ -4177,7 +4286,7 @@ app.get('/api/global-settings', (_req: Request, res: Response) => {
   return res.json(cachedGlobalSettings);
 });
 
-app.post('/api/global-settings', (req: Request, res: Response) => {
+app.post('/api/global-settings', requireAdmin, (req: Request, res: Response) => {
   const disabled = Boolean(req.body?.notificationsPermanentlyDisabled);
   cachedGlobalSettings = {
     notificationsPermanentlyDisabled: disabled,
@@ -4199,7 +4308,7 @@ async function startServer() {
   } else {
     const distPath = path.join(__dirname, 'dist');
     app.use(express.static(distPath));
-    app.get('*', (_req: Request, res: Response) => {
+    app.get(/^\/(?!api).*/, (_req: Request, res: Response) => {
       res.sendFile(path.join(distPath, 'index.html'));
     });
   }

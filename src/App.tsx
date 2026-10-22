@@ -197,16 +197,18 @@ function buildClientQuestionRefinements(rawPrompt: string, lang: Language): {
 
   const normalized = raw
     .replace(/\s+/g, ' ')
-    .replace(/السوائل|السول|السوال|السؤل/g, 'السؤال')
+    .replace(/(?:^|[\s،.؛!؟])(السول|السوال|السؤل)(?=[\s،.؛!؟]|$)/g, ' السؤال ')
     .replace(/خورميات|خورزميات|خوارزميت/g, 'خوارزميات')
     .replace(/تيدكلت|تدكلت/g, 'تيديكلت')
     .replace(/اصطناعيي|الصطناعي|إصطناعي/g, 'اصطناعي')
     .replace(/برمجه/g, 'برمجة')
-    .replace(/خطاء|خطا\b/g, 'خطأ')
-    .replace(/تكد|تاكد|تأكذ/g, 'التأكد')
+    .replace(/(?:^|[\s،.؛!؟])(خطاء)(?=[\s،.؛!؟]|$)/g, ' خطأ ')
+    .replace(/(?:^|[\s،.؛!؟])(تاكد|تأكذ)(?=[\s،.؛!؟]|$)/g, ' التأكد ')
     .replace(/تعتمل/g, 'تعتمد')
     .replace(/اقتراحت/g, 'اقتراحات')
-    .replace(/انا كان/g, 'إن كان');
+    .replace(/انا كان/g, 'إن كان')
+    .replace(/\s+/g, ' ')
+    .trim();
 
   const cleanTopic =
     normalized.replace(/^(ما هو|ما هي|كيف|اشرح|اريد|أريد|عن|حول)\s+/i, '').trim() ||
@@ -1367,7 +1369,13 @@ export default function App() {
   const handleResetRatings = async () => {
     if (!window.confirm('هل أنت متأكد من إعادة ضبط سجل تقييمات الجودة؟')) return;
     try {
-      const res = await fetch('/api/ratings/reset', { method: 'POST' });
+      const res = await fetch('/api/ratings/reset', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-admin-token': ADMIN_PIN,
+        },
+      });
       if (res.ok) {
         setStatsNotification('تمت إعادة ضبط سجل تقييمات الجودة بنجاح ✨');
         setTimeout(() => setStatsNotification(null), 3500);
@@ -1400,7 +1408,13 @@ export default function App() {
     if (!window.confirm('هل أنت متأكد من إعادة ضبط وتحديث سجل البيانات الإحصائية؟')) return;
     setIsLoadingStats(true);
     try {
-      const res = await fetch('/api/ain-salah/stats/reset', { method: 'POST' });
+      const res = await fetch('/api/ain-salah/stats/reset', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-admin-token': ADMIN_PIN,
+        },
+      });
       if (res.ok) {
         setStatsNotification('تمت إعادة ضبط وتحديث سجل البيانات الإحصائية بنجاح ✨');
         setTimeout(() => setStatsNotification(null), 3500);
@@ -1733,7 +1747,10 @@ export default function App() {
     try {
       await fetch('/api/global-settings', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'x-admin-token': ADMIN_PIN,
+        },
         body: JSON.stringify({ notificationsPermanentlyDisabled: disabled }),
       });
     } catch (err) {
