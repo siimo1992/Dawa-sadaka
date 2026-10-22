@@ -1,4 +1,4 @@
-const CACHE_NAME = 'tidikelt-ai-v2';
+const CACHE_NAME = 'tidikelt-ai-v3';
 const OFFLINE_URL = '/offline.html';
 
 const PRECACHE_ASSETS = [
@@ -42,6 +42,15 @@ self.addEventListener('fetch', (event) => {
   if (request.method !== 'GET') return;
 
   const url = new URL(request.url);
+
+  // Never intercept or cache APK binary downloads or APK management endpoints
+  if (
+    url.pathname.startsWith('/downloads/') ||
+    url.pathname.startsWith('/api/apk/') ||
+    url.pathname.endsWith('.apk')
+  ) {
+    return;
+  }
 
   // Network-first with cache fallback for read-only status APIs
   if (url.pathname === '/api/ain-salah/today' || url.pathname === '/api/health') {

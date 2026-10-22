@@ -1471,6 +1471,7 @@ export default function App() {
 
   // Download App Dialog State
   const [isDownloadModalOpen, setIsDownloadModalOpen] = useState(false);
+  const [downloadModalOwnerMode, setDownloadModalOwnerMode] = useState(false);
 
   // Sending progress timer
   const [sendSecondsElapsed, setSendSecondsElapsed] = useState(0);
@@ -7882,6 +7883,46 @@ export default function App() {
                   </div>
                 </div>
 
+                {/* Android APK & Direct Download Link Manager Card */}
+                <div className="bg-[var(--card)] border border-[var(--line)] rounded-2xl p-4 space-y-2.5 shadow-sm">
+                  <div className="flex items-center justify-between gap-2">
+                    <div>
+                      <b className="text-xs text-[var(--ink)] flex items-center gap-1.5">
+                        <Download className="w-4 h-4 text-[var(--green)]" />
+                        <span>إدارة ملف APK وروابط تحميل تطبيق الأندرويد</span>
+                      </b>
+                      <p className="text-[11px] text-[var(--mute)] m-0 mt-0.5">
+                        رفع ملف APK الفعلي إلى الخادم أو ربط زر التنزيل برابط خارجي مباشر (Google Drive / GitHub)
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-2 pt-1">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setDownloadModalOwnerMode(true);
+                        setIsDownloadModalOpen(true);
+                      }}
+                      className="flex-1 py-2.5 px-4 rounded-xl bg-[var(--green)] text-[var(--on)] text-xs font-bold flex items-center justify-center gap-2 cursor-pointer transition-opacity hover:opacity-90 shadow-xs"
+                    >
+                      <Download className="w-4 h-4" />
+                      <span>فتح لوحة إدارة ملف APK والرابط المباشر</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setDownloadModalOwnerMode(false);
+                        setIsDownloadModalOpen(true);
+                      }}
+                      className="py-2.5 px-3.5 rounded-xl border border-[var(--line)] bg-[var(--bg)] text-xs font-bold text-[var(--ink)] hover:border-[var(--green)] cursor-pointer transition-colors"
+                    >
+                      معاينة نافذة التنزيل
+                    </button>
+                  </div>
+                </div>
+
                 <div className="bg-[var(--card)] border border-[var(--line)] rounded-2xl p-4 space-y-3 shadow-sm">
                   <b className="text-xs text-[var(--ink)] block">تنظيف وصيانة قاعدة الأخبار:</b>
 
@@ -8200,10 +8241,15 @@ export default function App() {
         onDisablePermanently={() => handleSetNotificationsPermanentlyDisabled(true)}
       />
 
-      {/* Official Download App Dialog (Android APK & iOS PWA Guide) */}
+      {/* Official Download App Dialog (Android APK & iOS PWA Guide + Owner APK Manager) */}
       <DownloadAppModal
         isOpen={isDownloadModalOpen}
-        onClose={() => setIsDownloadModalOpen(false)}
+        onClose={() => {
+          setIsDownloadModalOpen(false);
+          setDownloadModalOwnerMode(false);
+        }}
+        isAdminLoggedIn={isAdminLoggedIn}
+        openInOwnerMode={downloadModalOwnerMode}
       />
 
       {/* Rafiq Al-Tariq Inter-Wilaya Ride Sharing Brain Modal */}

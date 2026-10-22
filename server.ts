@@ -28,6 +28,7 @@ import { registerUpgradeRoutes, buildAinSalahTodaySummary } from './server/secur
 import { registerCommunityNewsRoutes } from './src/server/communityNewsServer.ts';
 import { registerCloudSqlAndTasksRoutes } from './src/server/cloudSqlAndTasksRoutes.ts';
 import { registerRafiqAlTariqRoutes } from './src/server/rafiqAlTariqServer.ts';
+import { registerApkReleaseRoutes } from './src/server/apkReleaseServer.ts';
 import {
   normalizeQuery,
   hash,
@@ -70,6 +71,7 @@ registerUpgradeRoutes(app, ai);
 registerCommunityNewsRoutes(app, ai);
 registerCloudSqlAndTasksRoutes(app);
 registerRafiqAlTariqRoutes(app, ai);
+registerApkReleaseRoutes(app);
 
 // Health check endpoint
 app.get('/api/health', (_req: Request, res: Response) => {
