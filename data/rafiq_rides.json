@@ -1,0 +1,47 @@
+[
+  {
+    "id": "ride-dz-1",
+    "origin": "عين صالح",
+    "destination": "الجزائر",
+    "departure_time": "غدًا · 06:00",
+    "companion_type": "CO_DRIVER",
+    "price_dzd": 0,
+    "seats": 2,
+    "totalSeats": 2,
+    "notes": "تويوتا هايلوكس · رفيق قيادة يتناوب مع السائق",
+    "driverName": "سائق رفيق الطريق",
+    "driverPhone": "0555000001",
+    "createdAt": 1792775365758,
+    "bookingsCount": 0
+  },
+  {
+    "id": "ride-dz-2",
+    "origin": "عين صالح",
+    "destination": "تمنراست",
+    "departure_time": "اليوم · 16:30",
+    "companion_type": "COST_SHARE",
+    "price_dzd": 1500,
+    "seats": 3,
+    "totalSeats": 3,
+    "notes": "بيجو 406 مكيفة · الانطلاق من وسط المدينة",
+    "driverName": "ياسين",
+    "driverPhone": "0555000002",
+    "createdAt": 1792770265758,
+    "bookingsCount": 0
+  },
+  {
+    "id": "ride-dz-3",
+    "origin": "أدرار",
+    "destination": "عين صالح",
+    "departure_time": "غدًا · 07:30",
+    "companion_type": "COST_SHARE",
+    "price_dzd": 1200,
+    "seats": 2,
+    "totalSeats": 2,
+    "notes": "رونو سامبول · مرورًا بأولف وفقارة الزوى",
+    "driverName": "محمد أمين",
+    "driverPhone": "0555000003",
+    "createdAt": 1792766665758,
+    "bookingsCount": 0
+  }
+]

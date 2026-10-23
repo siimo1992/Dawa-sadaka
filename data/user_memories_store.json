@@ -1,0 +1,17 @@
+{
+  "tester": {
+    "user_id": "tester",
+    "enabled": true,
+    "entries": []
+  },
+  "default_user": {
+    "user_id": "default_user",
+    "enabled": true,
+    "entries": []
+  },
+  "mem_user_1792773077057": {
+    "user_id": "mem_user_1792773077057",
+    "enabled": true,
+    "entries": []
+  }
+}

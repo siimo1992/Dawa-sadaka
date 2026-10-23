@@ -119,6 +119,12 @@ import {
   subscribeToCloudSavedNews,
 } from './services/firebaseService';
 import type { User as FirebaseUser } from 'firebase/auth';
+import { LongTermMemoryModal } from './components/LongTermMemoryModal';
+import {
+  GeneratedFileCard,
+  ConvertMessageToFileMenu,
+  type GeneratedFileInfo,
+} from './components/GeneratedFileCard';
 
 interface Agent {
   id: string;
@@ -183,6 +189,7 @@ interface Message {
   codeCategory?: CodeCategory;
   isManualCodeCategory?: boolean;
   suggestedQuestions?: string[];
+  generatedFile?: GeneratedFileInfo;
 }
 
 function buildClientQuestionRefinements(rawPrompt: string, lang: Language): {
@@ -1212,6 +1219,49 @@ export default function App() {
     e.target.value = '';
   };
 
+  // Multi-file upload (PDF, DOCX, XLSX, CSV, TXT, MD, HTML) & Long-Term Memory modal state
+  const [uploadedMultiFiles, setUploadedMultiFiles] = useState<
+    Array<{ filename: string; size: string; contentBase64: string }>
+  >([]);
+  const multiFileInputRef = useRef<HTMLInputElement | null>(null);
+  const [isMemoryModalOpen, setIsMemoryModalOpen] = useState<boolean>(false);
+  const sendAbortControllerRef = useRef<AbortController | null>(null);
+  const [editingUserMsgId, setEditingUserMsgId] = useState<string | null>(null);
+  const [editingUserMsgText, setEditingUserMsgText] = useState<string>('');
+
+  const handleMultiFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files: File[] = Array.from(e.target.files || []);
+    if (files.length === 0) return;
+
+    files.slice(0, 5).forEach((file: File) => {
+      if (file.size > 20 * 1024 * 1024) return;
+      const sizeStr =
+        file.size < 1024 * 1024
+          ? `${(file.size / 1024).toFixed(1)} KB`
+          : `${(file.size / (1024 * 1024)).toFixed(1)} MB`;
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        const resStr = String(ev.target?.result || '');
+        setUploadedMultiFiles((prev) => [
+          ...prev,
+          { filename: file.name, size: sizeStr, contentBase64: resStr },
+        ]);
+      };
+      reader.readAsDataURL(file);
+    });
+    e.target.value = '';
+  };
+
+  const handleStopGeneration = () => {
+    if (sendAbortControllerRef.current) {
+      try {
+        sendAbortControllerRef.current.abort();
+      } catch {}
+      sendAbortControllerRef.current = null;
+    }
+    setIsSending(false);
+  };
+
   const handleCopyText = (id: string, text: string) => {
     if (navigator.clipboard) {
       navigator.clipboard.writeText(text);
@@ -1261,7 +1311,10 @@ export default function App() {
     if (isTogglingOff) {
       setRatingPopoverMsgId(null);
       try {
-        await fetch(`/api/ratings/${msgId}`, { method: 'DELETE' });
+        await fetch(`/api/ratings/${msgId}`, {
+          method: 'DELETE',
+          headers: { 'x-admin-token': ADMIN_PIN },
+        });
       } catch (err) {
         console.error('Failed to remove rating:', err);
       }
@@ -1392,7 +1445,9 @@ export default function App() {
   const fetchAnalytics = async () => {
     setIsLoadingStats(true);
     try {
-      const res = await fetch('/api/ain-salah/stats');
+      const res = await fetch('/api/ain-salah/stats', {
+        headers: { 'x-admin-token': ADMIN_PIN },
+      });
       if (res.ok) {
         const data = await res.json();
         setAnalyticsData(data);
@@ -2930,10 +2985,11 @@ export default function App() {
       return;
     }
 
-    if ((!q && !selectedImage && !selectedPdf) || isSending) return;
+    if ((!q && !selectedImage && !selectedPdf && uploadedMultiFiles.length === 0) || isSending) return;
 
     const currentImage = selectedImage;
     const currentPdf = selectedPdf;
+    const currentMultiFiles = [...uploadedMultiFiles];
     setInputText('');
     if (isListening) {
       try {
@@ -2943,12 +2999,17 @@ export default function App() {
     }
     setSelectedImage(null);
     setSelectedPdf(null);
+    setUploadedMultiFiles([]);
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto';
     }
 
     let defaultText = '';
-    if (currentPdf) {
+    if (currentMultiFiles.length >= 2) {
+      defaultText = `قارن بين الملفات المرفوعة (${currentMultiFiles.map((f) => f.filename).join(' ، ')}) واستخرج أوجه التشابه والاختلاف في جدول منظم.`;
+    } else if (currentMultiFiles.length === 1) {
+      defaultText = `حلل ولخص الملف المرفق «${currentMultiFiles[0].filename}» واستخرج أهم النقاط والبيانات الواردة فيه.`;
+    } else if (currentPdf) {
       defaultText = `مستند PDF مرفق: «${currentPdf.name}». يرجى قراءته وتلخيصه واستخراج أهم القرارات والشروط والآجال.`;
     } else if (currentImage) {
       defaultText = 'تقرير مصور: الرجاء فحص وتحليل هذا العطل أو الحادث وتقديم إرشادات عاجلة.';
@@ -2965,6 +3026,8 @@ export default function App() {
 
     setMessages((prev) => [...prev, userMsg]);
     setIsSending(true);
+    const abortCtrl = new AbortController();
+    sendAbortControllerRef.current = abortCtrl;
 
     try {
       const historyPairs: [string, string][] = [];
@@ -3068,16 +3131,20 @@ export default function App() {
       const res = await fetch('/api/ain-salah/ask', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        signal: abortCtrl.signal,
         body: JSON.stringify({
           query: userMsg.text,
           mode: tidikeltMode,
           image: currentImage,
           pdf: currentPdf,
+          uploadedFiles: currentMultiFiles,
+          conversation_id: activeSessionId,
+          user_id: firebaseUser?.uid || 'default_user',
           agentId: selectedAgentId !== 'swarm' ? selectedAgentId : undefined,
           language: lang,
           news: approvedNews,
           fixes: fixes,
-          history: historyPairs.slice(-3),
+          history: historyPairs.slice(-5),
           weatherAlert: weatherAlert.active ? weatherAlert : null,
           clientTemporalContext: {
             timestamp: Date.now(),
@@ -3129,6 +3196,7 @@ export default function App() {
         groundingQueries: data.groundingQueries,
         multiModelEngines: data.multiModelEngines,
         sourceInfo: data.sourceInfo,
+        generatedFile: data.generatedFile || undefined,
         timestamp: Date.now(),
         userPromptText: userMsg.text,
         agentId: data.agent?.id || (selectedAgentId !== 'swarm' ? selectedAgentId : 'swarm'),
@@ -3138,6 +3206,9 @@ export default function App() {
 
       setMessages((prev) => [...prev, botMsg]);
     } catch (err: any) {
+      if (err?.name === 'AbortError') {
+        return;
+      }
       const clientRefined = buildClientQuestionRefinements(userMsg.text, lang);
       const errorMsg: Message = {
         id: `msg-${Date.now() + 1}`,
@@ -3148,6 +3219,7 @@ export default function App() {
       };
       setMessages((prev) => [...prev, errorMsg]);
     } finally {
+      sendAbortControllerRef.current = null;
       setIsSending(false);
     }
   };
@@ -5231,17 +5303,64 @@ export default function App() {
                         )}
 
                         {isMe ? (
-                          /* User Prompt Bubble */
+                          /* User Prompt Bubble with Edit & Resend support */
                           <>
-                            <div className="px-4 py-3 sm:px-5 sm:py-3.5 rounded-3xl rounded-tr-xs max-w-[90%] sm:max-w-xl bg-gradient-to-br from-[var(--green)] to-emerald-700 text-white self-start shadow-sm text-[14.5px] sm:text-[15.5px] leading-relaxed font-medium selection:bg-white/30 whitespace-pre-wrap">
-                              {m.text}
-                            </div>
+                            {editingUserMsgId === m.id ? (
+                              <div className="w-full max-w-xl rounded-2xl bg-[var(--card)] border border-[var(--green)] p-3 space-y-2 self-start shadow-sm">
+                                <textarea
+                                  value={editingUserMsgText}
+                                  onChange={(e) => setEditingUserMsgText(e.target.value)}
+                                  rows={2}
+                                  className="w-full rounded-xl bg-[var(--bg)] border border-[var(--line)] text-[var(--ink)] p-2 text-xs focus:outline-none"
+                                />
+                                <div className="flex items-center justify-end gap-2">
+                                  <button
+                                    type="button"
+                                    onClick={() => setEditingUserMsgId(null)}
+                                    className="px-2.5 py-1 rounded-lg text-xs text-[var(--mute)] hover:text-[var(--ink)] cursor-pointer"
+                                  >
+                                    إلغاء
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const updated = editingUserMsgText.trim();
+                                      setEditingUserMsgId(null);
+                                      if (updated) {
+                                        handleSend(updated);
+                                      }
+                                    }}
+                                    className="px-3 py-1 rounded-lg bg-[var(--green)] text-white text-xs font-bold cursor-pointer"
+                                  >
+                                    إرسال التعديل
+                                  </button>
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="px-4 py-3 sm:px-5 sm:py-3.5 rounded-3xl rounded-tr-xs max-w-[90%] sm:max-w-xl bg-gradient-to-br from-[var(--green)] to-emerald-700 text-white self-start shadow-sm text-[14.5px] sm:text-[15.5px] leading-relaxed font-medium selection:bg-white/30 whitespace-pre-wrap">
+                                {m.text}
+                              </div>
+                            )}
                             <div
-                              className="flex items-center gap-1 px-2 mt-1 text-[10.5px] text-[var(--mute)] self-start font-semibold select-none"
+                              className="flex items-center gap-2 px-2 mt-1 text-[10.5px] text-[var(--mute)] self-start font-semibold select-none"
                               title={new Date(m.timestamp).toLocaleString(lang === 'ar' ? 'ar-DZ' : lang === 'fr' ? 'fr-FR' : 'en-US')}
                             >
-                              <Clock className="w-3 h-3 opacity-70" />
-                              <span>{formatMessageTimestamp(m.timestamp, lang)}</span>
+                              <span className="flex items-center gap-1">
+                                <Clock className="w-3 h-3 opacity-70" />
+                                <span>{formatMessageTimestamp(m.timestamp, lang)}</span>
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setEditingUserMsgId(m.id);
+                                  setEditingUserMsgText(m.text);
+                                }}
+                                className="hover:text-[var(--ink)] flex items-center gap-0.5 cursor-pointer"
+                                title="تعديل الرسالة وإعادة الإرسال"
+                              >
+                                <Edit3 className="w-3 h-3" />
+                                <span>تعديل</span>
+                              </button>
                             </div>
                           </>
                         ) : (
@@ -5268,6 +5387,9 @@ export default function App() {
                                 <div className="w-full">
                                   <MarkdownRenderer content={effectiveBotText} isRtl={lang === 'ar'} />
                                 </div>
+
+                                {/* Real Verified Generated File Card (Displayed when user requested a file or converted the answer) */}
+                                {m.generatedFile && <GeneratedFileCard file={m.generatedFile} />}
 
                             {/* Dedicated Interactive Executed Code & Output Card (tidikelt-agent codeExecution) */}
                             {(m.code || m.codeOutput) && (
@@ -5468,6 +5590,34 @@ export default function App() {
                                     <Volume2 className="w-3.5 h-3.5 text-[var(--green)]" />
                                     <span>{t.listen}</span>
                                   </button>
+
+                                  {/* Explicit Convert Answer to File Menu (PDF, DOCX, XLSX, PPTX, CSV, MD, HTML, TXT) */}
+                                  <ConvertMessageToFileMenu
+                                    messageTitle={m.userPromptText || 'وثيقة تيدكلت AI'}
+                                    messageContent={m.text}
+                                    conversationId={activeSessionId}
+                                    onFileGenerated={(fileInfo) => {
+                                      setMessages((prev) =>
+                                        prev.map((item) =>
+                                          item.id === m.id ? { ...item, generatedFile: fileInfo } : item
+                                        )
+                                      );
+                                    }}
+                                  />
+
+                                  {/* Retry / Regenerate Answer Button */}
+                                  {m.userPromptText && (
+                                    <button
+                                      type="button"
+                                      onClick={() => handleSend(m.userPromptText)}
+                                      disabled={isSending}
+                                      className="px-2.5 py-1 rounded-xl bg-[var(--bg)] hover:bg-[var(--line)]/50 border border-[var(--line)] text-[var(--ink)] hover:text-[var(--green)] text-[11px] font-bold flex items-center gap-1.5 cursor-pointer transition-all disabled:opacity-50 whitespace-nowrap"
+                                      title="إعادة توليد الإجابة"
+                                    >
+                                      <RotateCcw className="w-3.5 h-3.5" />
+                                      <span>إعادة المحاولة</span>
+                                    </button>
+                                  )}
 
                                   {/* Internal Map & Tasks action: accessible when visitor asks about maps/locations/tasks */}
                                   {/(خريطة|خرائط|أين تقع|موقع|مهام الواحة|tasks|maps)/i.test(m.userPromptText || m.text) && (
@@ -5694,6 +5844,45 @@ export default function App() {
                   onChange={handlePdfSelect}
                   className="hidden"
                 />
+                {/* Hidden Multi-file document input (PDF, DOCX, XLSX, CSV, TXT, MD, HTML) */}
+                <input
+                  ref={multiFileInputRef}
+                  type="file"
+                  multiple
+                  accept=".pdf,.docx,.xlsx,.csv,.txt,.md,.html"
+                  onChange={handleMultiFileSelect}
+                  className="hidden"
+                />
+
+                {/* Attached Multi-Files Preview Box before sending */}
+                {uploadedMultiFiles.length > 0 && (
+                  <div className="mb-2 p-2.5 rounded-2xl bg-[var(--card)] border border-[var(--line)] shadow-sm space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-extrabold text-[var(--ink)]">
+                        ملفات مرفوعة للتحليل أو المقارنة ({uploadedMultiFiles.length})
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setUploadedMultiFiles([])}
+                        className="text-[11px] text-rose-500 hover:underline font-bold cursor-pointer"
+                      >
+                        إزالة الكل
+                      </button>
+                    </div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {uploadedMultiFiles.map((f, idx) => (
+                        <span
+                          key={idx}
+                          className="text-[11px] px-2.5 py-1 rounded-xl bg-[var(--bg)] border border-[var(--line)] text-[var(--ink)] font-bold flex items-center gap-1.5"
+                        >
+                          <FileText className="w-3.5 h-3.5 text-amber-600" />
+                          <span className="truncate max-w-[160px]">{f.filename}</span>
+                          <span className="text-[10px] text-[var(--mute)]">({f.size})</span>
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
 
                 {/* Attached PDF Document Preview Box before sending */}
                 {selectedPdf && (
@@ -6038,6 +6227,50 @@ export default function App() {
                               </span>
                             </div>
                           </button>
+
+                          {/* 4. Multi-File Upload & Comparison (DOCX, XLSX, PDF, CSV, TXT, MD, HTML) */}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              multiFileInputRef.current?.click();
+                              setIsPlusMenuOpen(false);
+                            }}
+                            className="w-full flex items-center gap-3 p-2 rounded-xl hover:bg-[var(--bg)] border border-transparent hover:border-[var(--line)]/60 transition-all cursor-pointer group text-right"
+                          >
+                            <div className="w-9 h-9 rounded-xl bg-amber-500/12 text-amber-600 flex items-center justify-center shrink-0 group-hover:scale-105 group-hover:bg-amber-500/20 transition-all shadow-2xs">
+                              <FileText className="w-4 h-4 stroke-[2.2]" />
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <span className="text-xs font-bold text-[var(--ink)] block group-hover:text-amber-600 transition-colors">
+                                ملفات متعددة / مقارنة مستندات
+                              </span>
+                              <span className="text-[10px] text-[var(--mute)] block truncate">
+                                تحليل ومقارنة DOCX, XLSX, PDF, CSV, TXT
+                              </span>
+                            </div>
+                          </button>
+
+                          {/* 5. User Long-Term Memory Preferences */}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setIsMemoryModalOpen(true);
+                              setIsPlusMenuOpen(false);
+                            }}
+                            className="w-full flex items-center gap-3 p-2 rounded-xl hover:bg-[var(--bg)] border border-transparent hover:border-[var(--line)]/60 transition-all cursor-pointer group text-right"
+                          >
+                            <div className="w-9 h-9 rounded-xl bg-purple-500/12 text-purple-600 flex items-center justify-center shrink-0 group-hover:scale-105 group-hover:bg-purple-500/20 transition-all shadow-2xs">
+                              <Sparkles className="w-4 h-4 stroke-[2.2]" />
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <span className="text-xs font-bold text-[var(--ink)] block group-hover:text-purple-600 transition-colors">
+                                الذاكرة الشخصية وتفضيلاتي
+                              </span>
+                              <span className="text-[10px] text-[var(--mute)] block truncate">
+                                عرض وتعديل وحذف ما يتذكره المساعد
+                              </span>
+                            </div>
+                          </button>
                         </div>
                       )}
 
@@ -6092,18 +6325,31 @@ export default function App() {
                         )}
                       </button>
 
-                      <button
-                        onClick={() => handleSend()}
-                        disabled={(!inputText.trim() && !selectedImage && !selectedPdf) || isSending}
-                        className="w-8 h-8 rounded-full bg-[var(--green)] text-white hover:opacity-90 flex items-center justify-center transition-all disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer shadow-xs"
-                        title={t.send}
-                      >
-                        {isSending ? (
-                          <Loader2 className="w-4 h-4 animate-spin" />
-                        ) : (
+                      {isSending ? (
+                        <button
+                          type="button"
+                          onClick={handleStopGeneration}
+                          className="px-3 h-8 rounded-full bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-xs"
+                          title="إيقاف التوليد فوراً"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                          <span>إيقاف</span>
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() => handleSend()}
+                          disabled={
+                            !inputText.trim() &&
+                            !selectedImage &&
+                            !selectedPdf &&
+                            uploadedMultiFiles.length === 0
+                          }
+                          className="w-8 h-8 rounded-full bg-[var(--green)] text-white hover:opacity-90 flex items-center justify-center transition-all disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer shadow-xs"
+                          title={t.send}
+                        >
                           <ArrowUp className="w-4 h-4 stroke-[2.5]" />
-                        )}
-                      </button>
+                        </button>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -8654,6 +8900,13 @@ export default function App() {
         onClose={() => setIsRafiqModalOpen(false)}
         lang={lang}
         isAdminLoggedIn={isAdminLoggedIn}
+      />
+
+      {/* User Long-Term Memory Preferences Modal */}
+      <LongTermMemoryModal
+        isOpen={isMemoryModalOpen}
+        onClose={() => setIsMemoryModalOpen(false)}
+        userId={firebaseUser?.uid || 'default_user'}
       />
     </div>
   );

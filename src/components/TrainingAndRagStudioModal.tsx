@@ -150,8 +150,8 @@ export const TrainingAndRagStudioModal: React.FC<TrainingAndRagStudioModalProps>
     setLoading(true);
     try {
       const [sftRes, rlhfRes, ragRes, docsRes, avatarsRes] = await Promise.all([
-        fetch('/api/training/sft').then((r) => r.json()),
-        fetch('/api/training/rlhf').then((r) => r.json()),
+        fetch('/api/training/sft', { headers: ADMIN_HEADERS }).then((r) => r.json()),
+        fetch('/api/training/rlhf', { headers: ADMIN_HEADERS }).then((r) => r.json()),
         fetch('/api/rag/knowledge-base').then((r) => r.json()),
         fetch('/api/rag/documents')
           .then((r) => (r.ok ? r.json() : { documents: [] }))
@@ -373,7 +373,7 @@ export const TrainingAndRagStudioModal: React.FC<TrainingAndRagStudioModalProps>
     try {
       const res = await fetch('/api/training/rlhf/vote', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...ADMIN_HEADERS },
         body: JSON.stringify({
           prompt: arenaPrompt,
           responseA: arenaResponseA,

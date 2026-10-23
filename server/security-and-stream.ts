@@ -257,12 +257,8 @@ export function registerUpgradeRoutes(app: Express, ai: GoogleGenAI) {
 
       let streamResp: any = null;
       const candidateModels = [
-        'gemini-3.8-flash',
-        'gemini-3.6-flash',
-        'gemini-3.5-flash',
-        'gemini-3.5-flash-lite',
         'gemini-3-flash-preview',
-        'gemini-3.1-flash-lite',
+        'gemini-3.1-flash-lite-preview',
       ];
       for (const candidateModel of candidateModels) {
         try {
@@ -290,7 +286,18 @@ export function registerUpgradeRoutes(app: Express, ai: GoogleGenAI) {
           }
         }
       } else {
-        fullText = `### ⚡ خلاصة مباشرة: ${cleanQuery}\n\n- **بيانات عين صالح اللحظية**: الوقت ${today.time24} | الحرارة ${today.weather.tempC}°م | الحالة: ${today.weather.conditionAr}.\n- **أرقام الطوارئ المعتمدة**: الحماية المدنية **14** | الدرك الوطني **1055** | الشرطة **17**.`;
+        const { streamDeepSeekChat } = await import('../src/server/deepseekService.ts');
+        for await (const dsToken of streamDeepSeekChat(cleanQuery, {
+          systemInstruction,
+          temperature: 0.3,
+        })) {
+          fullText += dsToken;
+          sendEvent('chunk', { text: dsToken });
+        }
+      }
+
+      if (!fullText) {
+        fullText = `⚠️ خدمة الذكاء الاصطناعي غير متاحة مؤقتاً (تعذّر الاتصال بالمحركات الأساسية والاحتياطية). يرجى المحاولة بعد قليل.\n\n- **بيانات عين صالح اللحظية**: الوقت ${today.time24} | الحرارة ${today.weather.tempC}°م | الحالة: ${today.weather.conditionAr}.\n- **أرقام الطوارئ المعتمدة**: الحماية المدنية **14** | الدرك الوطني **1055** | الشرطة **17**.`;
         sendEvent('chunk', { text: fullText });
       }
 
@@ -301,7 +308,7 @@ export function registerUpgradeRoutes(app: Express, ai: GoogleGenAI) {
       res.end();
     } catch {
       const today = buildAinSalahTodaySummary();
-      const fallbackText = `### ⚡ خلاصة مباشرة: ${cleanQuery}\n\n- **بيانات عين صالح اللحظية**: الوقت ${today.time24} | الحرارة ${today.weather.tempC}°م | الحالة: ${today.weather.conditionAr}.\n- **أرقام الطوارئ المعتمدة**: الحماية المدنية **14** | الدرك الوطني **1055**.`;
+      const fallbackText = `⚠️ تعذّر إكمال البث المباشر بسبب انقطاع مؤقت في الاتصال بمحرك الذكاء الاصطناعي. يرجى المحاولة مجدداً.\n\n- **بيانات عين صالح اللحظية**: الوقت ${today.time24} | الحرارة ${today.weather.tempC}°م | الحالة: ${today.weather.conditionAr}.\n- **أرقام الطوارئ المعتمدة**: الحماية المدنية **14** | الدرك الوطني **1055**.`;
       sendEvent('chunk', { text: fallbackText });
       sendEvent('done', {
         text: fallbackText,

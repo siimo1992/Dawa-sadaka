@@ -1,5 +1,6 @@
 import express from 'express';
 import type { Request, Response } from 'express';
+import dns from 'node:dns';
 import fs from 'fs';
 import path from 'path';
 import { performance } from 'node:perf_hooks';
@@ -7,6 +8,12 @@ import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 import OpenAI from 'openai';
 import { GoogleGenAI } from '@google/genai';
+
+try {
+  dns.setDefaultResultOrder('ipv4first');
+} catch {
+  // ignore if unsupported
+}
 import {
   getSftDataset,
   addSftExample,
@@ -38,9 +45,47 @@ import {
   PROMPT_VERSION,
 } from './src/server/cacheService.ts';
 import { routeQuestion } from './lib/smart-routing.ts';
+import {
+  enrichSearchSourcesWithPageContent,
+  searchWikipediaSources,
+  buildSessionSourceFollowUpContext,
+  searchLiveWebSources,
+} from './src/server/smartWebSearchEngine.ts';
 import type { KnowledgeChunk, IndexedDocument } from './src/types.ts';
+import {
+  applyFixes,
+  errorHandler,
+  getModels,
+  isModelNotFound,
+  isTransientModelError,
+  isQuotaExceededError,
+  isTimeoutError,
+  classifyEngineFailure,
+  buildClearEngineErrorMessage,
+  type EngineFailureKind,
+  requireAdmin as fixesRequireAdmin,
+} from './fixes.ts';
+import { registerTravelCompanionRoutes } from './travelCompanion.ts';
+import { registerNewsHubRoutes } from './newsHub.ts';
+import {
+  registerTidikeltAssistantRoutes,
+  preprocessAssistantRequest,
+  postprocessAssistantResponse,
+} from './src/server/tidikeltAssistantRoutes.ts';
+import {
+  askDeepSeek,
+  callDeepSeekWithMeta,
+  streamDeepSeekChat,
+  getDeepSeekStatus,
+  DEEPSEEK_DEFAULT_MODEL,
+} from './src/server/deepseekService.ts';
 
 dotenv.config();
+
+// Ensure ADMIN_TOKEN has a default in the live runtime if not explicitly set in .env
+if (!process.env.ADMIN_TOKEN) {
+  process.env.ADMIN_TOKEN = process.env.OWNER_PIN || '159159';
+}
 
 import rateLimit from 'express-rate-limit';
 
@@ -50,22 +95,12 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const PORT = Number(process.env.PORT) || 3000;
 
-// Controlled body limit to prevent memory exhaustion and DoS (6MB is ample for base64 images/PDFs)
-app.use(express.json({ limit: '6mb' }));
+// Apply unified hardening: security headers, rate limits, adminGate, bodySizeGate, json parser, stripClientControlledPrompts
+applyFixes(app);
 
 // Master Admin Access Token Guard (Protected admin operations)
 export const ADMIN_TOKEN = process.env.ADMIN_TOKEN || '159159';
-
-export const requireAdmin = (req: Request, res: Response, next: Function) => {
-  const token = req.headers['x-admin-token'] || req.query.admin_token;
-  if (!token || String(token).trim() !== ADMIN_TOKEN) {
-    return res.status(401).json({
-      error: 'unauthorized',
-      message: 'غير مصرح: هذا الإجراء مخصص لإدارة المنصة ويتطلب رمز المشرف الإداري المعتمد (x-admin-token).',
-    });
-  }
-  next();
-};
+export const requireAdmin = fixesRequireAdmin;
 
 // Rate limiters to prevent API abuse, excessive cost, and resource exhaustion
 export const aiRateLimiter = rateLimit({
@@ -84,14 +119,10 @@ export const heavyAiRateLimiter = rateLimit({
   message: { error: 'تم تجاوز الحد المسموح للميزات الثقيلة (صور أو صوت). يرجى المحاولة بعد قليل.' },
 });
 
-// Centralized verified Gemini model constants
-export const PRIMARY_GEMINI_MODEL = 'gemini-2.5-flash';
-export const ADVANCED_GEMINI_MODEL = 'gemini-2.5-pro';
-export const SUPPORTED_GEMINI_MODELS = [
-  'gemini-2.5-flash',
-  'gemini-2.5-pro',
-  'gemini-flash-latest',
-];
+// Centralized verified Gemini model constants (verified with @google/genai runtime)
+export const PRIMARY_GEMINI_MODEL = 'gemini-3-flash-preview';
+export const ADVANCED_GEMINI_MODEL = 'gemini-3.1-pro-preview';
+export const SUPPORTED_GEMINI_MODELS = getModels();
 
 // Initialize Gemini SDK with User-Agent header as required
 const ai = new GoogleGenAI({
@@ -110,18 +141,132 @@ let dailyTickerCache: { summary: string; key: string; updatedAt: number } | null
 
 // Register ain-salah-upgrade security, today summary, SOS dispatch, and SSE stream routes
 registerUpgradeRoutes(app, ai);
+registerTidikeltAssistantRoutes(app);
 registerCommunityNewsRoutes(app, ai);
 registerCloudSqlAndTasksRoutes(app);
 registerRafiqAlTariqRoutes(app, ai);
 registerApkReleaseRoutes(app);
+registerTravelCompanionRoutes(app, ai);
+registerNewsHubRoutes(app, ai);
 
 // Health check endpoint
 app.get('/api/health', (_req: Request, res: Response) => {
+  const deepseek = getDeepSeekStatus();
   res.json({
     status: 'ok',
     hasKey: Boolean(process.env.GEMINI_API_KEY),
+    hasDeepSeekKey: deepseek.configured,
+    deepSeekStatus: deepseek,
     timestamp: new Date().toISOString(),
   });
+});
+
+// Dedicated Server-Side DeepSeek Chat Endpoint with Silent Failover to Gemini on 402/Missing Key
+app.post('/api/deepseek/chat', aiRateLimiter, async (req: Request, res: Response) => {
+  try {
+    const rawMessage =
+      typeof req.body?.message === 'string'
+        ? req.body.message.trim()
+        : typeof req.body?.prompt === 'string'
+        ? req.body.prompt.trim()
+        : Array.isArray(req.body?.messages) && req.body.messages.length > 0
+        ? String(
+            req.body.messages[req.body.messages.length - 1]?.content ||
+              req.body.messages[req.body.messages.length - 1]?.text ||
+              ''
+          ).trim()
+        : '';
+
+    if (!rawMessage) {
+      return res.status(400).json({ error: 'يرجى إرسال نص الرسالة (message).' });
+    }
+
+    const systemInstruction =
+      typeof req.body?.systemInstruction === 'string' && req.body.systemInstruction.trim()
+        ? req.body.systemInstruction.trim()
+        : undefined;
+
+    const historyMessages = Array.isArray(req.body?.messages)
+      ? req.body.messages
+          .filter((m: any) => m && typeof (m.content || m.text) === 'string')
+          .map((m: any) => ({
+            role: (m.role === 'model' || m.role === 'assistant'
+              ? 'assistant'
+              : m.role === 'system'
+              ? 'system'
+              : 'user') as 'system' | 'user' | 'assistant',
+            content: String(m.content || m.text).trim(),
+          }))
+      : undefined;
+
+    // 1. Try DeepSeek server-side call first
+    const dsResult = await callDeepSeekWithMeta(rawMessage, {
+      model: DEEPSEEK_DEFAULT_MODEL,
+      systemInstruction,
+      messages: historyMessages,
+      ignoreCooldown: Boolean(req.body?.forceDeepSeek),
+    });
+
+    if (dsResult.ok && dsResult.text) {
+      return res.json({
+        reply: dsResult.text,
+        text: dsResult.text,
+        provider: 'deepseek',
+        model: dsResult.model,
+        fallbackUsed: false,
+        notice: null,
+      });
+    }
+
+    // 2. If DeepSeek balance is exhausted (402), rate-limited (429), or key is not set yet -> Silent fallback to Gemini
+    for (const candidateModel of SUPPORTED_GEMINI_MODELS) {
+      if ((modelCooldownUntil[candidateModel] || 0) > Date.now()) continue;
+      try {
+        const geminiResp = await ai.models.generateContent({
+          model: candidateModel,
+          contents: rawMessage,
+          config: {
+            ...(systemInstruction ? { systemInstruction } : {}),
+            temperature: 0.4,
+          },
+        });
+        if (geminiResp && geminiResp.text) {
+          const fallbackNotice = dsResult.isBalanceExhausted
+            ? 'نفد رصيد حساب DeepSeek (402)، تم التحويل التلقائي الصامت إلى النموذج البديل (Gemini).'
+            : dsResult.isMissingKey
+            ? 'مفتاح DEEPSEEK_API_KEY غير مضبوط بعد في Secrets، تم الرد تلقائياً عبر النموذج البديل (Gemini).'
+            : 'تعذر الاتصال المؤقت بـ DeepSeek، تم التحويل التلقائي إلى النموذج البديل (Gemini).';
+
+          return res.json({
+            reply: geminiResp.text.trim(),
+            text: geminiResp.text.trim(),
+            provider: 'gemini-fallback',
+            model: candidateModel,
+            fallbackUsed: true,
+            deepSeekReason: dsResult.errorMessage,
+            notice: fallbackNotice,
+          });
+        }
+      } catch (geminiErr: any) {
+        modelCooldownUntil[candidateModel] = Date.now() + 30_000;
+      }
+    }
+
+    // 3. If both failed, return clear error message from askDeepSeek
+    const directMessage = await askDeepSeek(rawMessage, { systemInstruction, messages: historyMessages });
+    return res.status(dsResult.statusCode || 503).json({
+      error: dsResult.errorMessage || directMessage,
+      reply: directMessage,
+      text: directMessage,
+      provider: 'deepseek',
+      fallbackUsed: false,
+    });
+  } catch (error: any) {
+    console.error('[/api/deepseek/chat error]:', error?.message || error);
+    return res.status(500).json({
+      error: error?.message || 'حدث خطأ أثناء الاتصال بخادم الذكاء الاصطناعي.',
+    });
+  }
 });
 
 // --- Supervisor Query Statistics & Analytics Engine ---
@@ -766,42 +911,40 @@ export type TidikeltMode = 'auto' | 'chat' | 'search' | 'code';
 export function makeSystemPrompt(replyStyle = 'ar'): string {
   const style =
     replyStyle === 'ar-dz'
-      ? 'أجب بدارجة جزائرية بسيطة ومفهومة.'
-      : 'أجب بعربية سهلة وواضحة.';
+      ? 'رد بلغة المستخدم: دارجة جزائرية بسيطة ومفهومة إذا كتب بها، أو فصحى بسيطة.'
+      : 'رد بلغة المستخدم: فصحى بسيطة، أو دارجة جزائرية إذا كتب بها.';
 
   return `
-أنت مساعد يجيب عن سؤال المستخدم مباشرة.
+أنت "تيديكلت AI"، مساعد ذكي داخل تطبيق تيديكلت. تساعد المستخدمين في المحادثة، والبحث عن المعلومات، وتحليل المستندات، والبرمجة.
 
-أسلوب الإجابة:
+الأسلوب:
 - ${style}
-- ابدأ بالجواب، ولا تُعد صياغة السؤال.
-- استخدم جملًا قصيرة، وغالبًا اكتفِ بجملتين أو ثلاث.
-- إذا طلب المستخدم جوابًا بالرقم فقط، فأرسل الرقم فقط.
-- لا تكرر عبارات ترحيبية أو قوالب ثابتة مثل "إعادة التأكيد".
-- لا تذكر اسم التطبيق أو المطوّر، ولا تضف عبارة "تطويري بواسطة DARTAGNAN MAHMUOD" إلى الإجابات.
-- اذكر اسم التطبيق أو المطوّر فقط إذا سأل المستخدم عنهما مباشرة.
-- لا تقل إنك بحثت أو تحققت إلا إذا استخدمت مصادر فعلية.
-- إذا لم تعرف، قل ذلك بوضوح بدل إعطاء كلام عام.
-`;
+- ابدأ بالجواب مباشرة، بدون مقدمات ولا تكرار للسؤال.
+- خلي الردود قصيرة وواضحة لأن الشاشة صغيرة. زد التفاصيل فقط إذا طلبها المستخدم.
+- نبرة دافئة ومحترمة، بدون تكلف.
+- إذا كان الجواب خطوات، اكتبها في قائمة قصيرة مرقمة.
+- في الكود: اعط الكود جاهز مع شرح قصير جدا.
+- عند تحليل مستند: لخص أهم النقاط أولا، ثم اسأل المستخدم وش يحب يتعمق فيه.
+- إذا ما عرفتش الجواب، قل ذلك بصراحة ولا تخترع معلومات أو مصادر.
+- في المواضيع القانونية والطبية والمالية: اعط معلومة عامة وانصح المستخدم يستشير مختص.
+- سؤال توضيحي واحد كحد أقصى، وفقط إذا كان ضروري.
+- إذا سألك المستخدم من أنت، قل إنك مساعد تيديكلت AI.
+`.trim();
 }
 
 const TIDIKELT_SYSTEM_INSTRUCTION = makeSystemPrompt('ar').trim();
 
 const STYLE_INSTRUCTIONS: Record<string, string> = {
   "ar-dz": `
-اكتب بالعربية الجزائرية الدارجة المفهومة في الجزائر.
-خلي الأسلوب طبيعي وواضح، بلا مبالغة في الكلمات المحلية.
-حافظ على كل الحقائق والأرقام والتواريخ والأسماء والروابط كما وردت في المصادر.
-ما تزيد حتى معلومة من عندك، وما تحوّلش التخمين إلى حقيقة.
-استعمل المصطلح العربي الفصيح إذا كان أوضح، ويمكن تشرح معناه بكلمة دارجة.
-إذا ما لقيتش المعلومة في المصادر، قول بوضوح: "ما لقيتش معلومة موثوقة على هذا."
-لا تعاودش صياغة السؤال بدل الإجابة.
+رد بالدارجة الجزائرية البسيطة والمفهومة بنبرة دافئة ومحترمة بدون تكلف.
+ابدأ بالجواب مباشرة بدون مقدمات ولا تكرار للسؤال، وخلي الردود قصيرة وواضحة لأن الشاشة صغيرة.
+حافظ على الحقائق والأرقام والتواريخ كما وردت في المصادر، وإذا ما عرفتش الجواب قول ذلك بصراحة ولا تخترع معلومات أو مصادر.
 `.trim(),
 
   "ar": `
-أجب بالعربية الفصحى الواضحة والمباشرة.
-حافظ على الحقائق والأرقام والمصادر كما وردت، ولا تضف معلومات غير مدعومة.
-إذا لم تتوفر معلومة كافية، صرّح بذلك بوضوح.
+رد بالعربية الفصحى البسيطة بنبرة دافئة ومحترمة بدون تكلف.
+ابدأ بالجواب مباشرة بدون مقدمات ولا تكرار للسؤال، وخلي الردود قصيرة وواضحة لأن الشاشة صغيرة.
+حافظ على الحقائق والأرقام والمصادر كما وردت، وإذا لم تعرف الجواب قل ذلك بصراحة ولا تخترع معلومات أو مصادر.
 `.trim(),
 };
 
@@ -1013,12 +1156,29 @@ app.post('/api/tidikelt/ask', aiRateLimiter, async (req: Request, res: Response)
   }
 
   try {
-    const { prompt = '', mode: requestedMode = 'auto', history = [], customCode } = req.body || {};
+    const {
+      prompt = '',
+      mode: requestedMode = 'auto',
+      history = [],
+      customCode,
+      conversation_id,
+      user_id = 'default_user',
+      uploadedFiles = [],
+    } = req.body || {};
     const cleanCustomCode = typeof customCode === 'string' && customCode.trim() ? customCode.trim() : undefined;
-    const cleanPrompt = String(prompt || (cleanCustomCode ? 'قم بتنفيذ هذا الكود البرمجي وإظهار ناتج تشغيله الفعلي' : '')).trim();
-    if (!cleanPrompt && !cleanCustomCode) {
+    const rawPrompt = String(prompt || (cleanCustomCode ? 'قم بتنفيذ هذا الكود البرمجي وإظهار ناتج تشغيله الفعلي' : '')).trim();
+    if (!rawPrompt && !cleanCustomCode) {
       return res.status(400).json({ error: 'Prompt or customCode is required.' });
     }
+
+    const assistantPrep = preprocessAssistantRequest({
+      rawQuery: rawPrompt,
+      conversationId: conversation_id,
+      userId: user_id,
+      clientHistory: Array.isArray(history) ? history : [],
+      uploadedFilesPayload: Array.isArray(uploadedFiles) ? uploadedFiles : [],
+    });
+    const cleanPrompt = assistantPrep.analysis.correctedText || rawPrompt;
 
     const route = chooseRoute(cleanPrompt, requestedMode);
     const mode: Exclude<TidikeltMode, 'auto'> = cleanCustomCode
@@ -1030,28 +1190,38 @@ app.post('/api/tidikelt/ask', aiRateLimiter, async (req: Request, res: Response)
       : detectTidikeltMode(cleanPrompt);
 
     let results: Array<{ title: string; url: string; snippet: string }> = [];
+    let searchFailed = false;
     if (route === 'web' && mode === 'search') {
-      results = await measure('webSearchMs', () =>
-        searchWeb(cleanPrompt, { timeoutMs: 5000 })
-      );
+      try {
+        results = await measure('webSearchMs', () =>
+          searchWeb(cleanPrompt, { timeoutMs: 6000, preferLiveWeb: true })
+        );
+      } catch {
+        searchFailed = true;
+      }
     }
 
+    const hasExternalWebUrl = results.some((r) => /^https?:\/\//i.test(r.url));
     const tools =
-      route === 'web' && mode === 'search' && Date.now() > googleSearchCooldownUntil && results.length === 0
+      route === 'web' && mode === 'search' && Date.now() > googleSearchCooldownUntil && !hasExternalWebUrl
         ? [{ googleSearch: {} }]
         : mode === 'code'
         ? [{ codeExecution: {} }]
         : undefined;
 
     const effectiveUserPrompt = cleanCustomCode
-      ? `${cleanPrompt}\n\nنفّذ الكود البرمجي التالي فعلياً عبر أداة codeExecution وأعطني ناتج التشغيل الدقيق:\n\`\`\`python\n${cleanCustomCode}\n\`\`\``
+      ? `${assistantPrep.enrichedQueryForModel}\n\nنفّذ الكود البرمجي التالي فعلياً عبر أداة codeExecution وأعطني ناتج التشغيل الدقيق:\n\`\`\`python\n${cleanCustomCode}\n\`\`\``
       : results.length > 0
-      ? `السؤال:\n${cleanPrompt}\n\nالمصادر المرفقة:\n${results.map((r, i) => `[${i + 1}] ${r.title}\n${r.url}\n${r.snippet}`).join('\n\n')}`
-      : cleanPrompt;
+      ? `السؤال:\n${assistantPrep.enrichedQueryForModel}\n\nنتائج ومصادر البحث المباشر المرفقة (اعتمد عليها وأشر إليها بوضوح دون اختلاق روابط إضافية):\n${results.map((r, i) => `[${i + 1}] ${r.title}${r.url ? `\nالرابط: ${r.url}` : ''}\nالمقتطف: ${r.snippet}`).join('\n\n')}`
+      : route === 'web' && mode === 'search'
+      ? `${assistantPrep.enrichedQueryForModel}\n\n[ملاحظة سياقية: تعذّر الوصول إلى مصادر ويب خارجية مباشرة لهذه المعلومة الآن. أجب بما يتوفر لديك من سياق ومعرفة موثوقة، مع التصريح بوضوح عن أي تفاصيل آنية أو متغيرة لم يتسنَّ التحقق منها عبر مصدر مباشر، ولا تختلق أي مصادر أو روابط].`
+      : assistantPrep.enrichedQueryForModel;
 
     const dialectStyle = detectDialectStyle(cleanPrompt, req.body?.replyStyle || req.body?.style);
     const styleInstruction = getStyleInstruction(dialectStyle);
-    let dynamicSystemInstruction = `${makeSystemPrompt(dialectStyle).trim()}\n\n${styleInstruction}`;
+    let dynamicSystemInstruction = `${makeSystemPrompt(dialectStyle).trim()}\n\n${styleInstruction}${
+      assistantPrep.systemContextInjection ? `\n\n${assistantPrep.systemContextInjection}` : ''
+    }`;
     if (mode !== 'code' && cleanPrompt) {
       try {
         const { ragContextPrompt } = executeSearchPipeline(cleanPrompt);
@@ -1072,53 +1242,114 @@ app.post('/api/tidikelt/ask', aiRateLimiter, async (req: Request, res: Response)
     ];
 
     let response: any = null;
-    const candidateModels = [
-      'gemini-3.8-flash',
-      'gemini-3.6-flash',
-      'gemini-3.5-flash',
-      'gemini-3.5-flash-lite',
-      'gemini-3-flash-preview',
-      'gemini-3.1-flash-lite',
-      'gemini-flash-latest',
-    ];
+    let providerNotice: string | null = null;
+    let activeProvider: 'gemini' | 'deepseek' = 'gemini';
+    const preferredProvider = req.body?.preferredProvider || req.body?.provider;
+    const candidateModels = SUPPORTED_GEMINI_MODELS;
+    const engineErrors: any[] = [];
 
     await measure('modelMs', async () => {
+      // If user explicitly preferred DeepSeek first, try DeepSeek and silently fall back to Gemini on 402/missing key
+      if (preferredProvider === 'deepseek' && mode === 'chat') {
+        const dsAttempt = await callDeepSeekWithMeta(effectiveUserPrompt, {
+          systemInstruction: dynamicSystemInstruction,
+          temperature: 0.5,
+          timeoutMs: 15000,
+        });
+        if (dsAttempt.ok && dsAttempt.text) {
+          response = { text: dsAttempt.text, candidates: [] };
+          activeProvider = 'deepseek';
+          return;
+        } else {
+          if (dsAttempt.errorMessage) engineErrors.push(new Error(dsAttempt.errorMessage));
+          providerNotice = dsAttempt.isBalanceExhausted
+            ? 'نفد رصيد DeepSeek (402)، تم التحويل التلقائي إلى النموذج البديل (Gemini).'
+            : dsAttempt.isMissingKey
+            ? 'لم يتم ضبط DEEPSEEK_API_KEY بعد، تم التحويل التلقائي إلى النموذج البديل (Gemini).'
+            : 'تم التحويل التلقائي من DeepSeek إلى النموذج البديل (Gemini).';
+        }
+      }
+
       for (const candidateModel of candidateModels) {
         if ((modelCooldownUntil[candidateModel] || 0) > Date.now()) continue;
+        let timer: NodeJS.Timeout | undefined;
         try {
-          response = await ai.models.generateContent({
+          const genCall = ai.models.generateContent({
             model: candidateModel,
             contents,
             config: {
               systemInstruction: dynamicSystemInstruction,
-              temperature: mode === 'code' ? 0.2 : 0.6,
+              temperature: mode === 'code' ? 0.2 : 0.5,
               ...(tools ? { tools } : {}),
             },
           });
+          const timeoutCall = new Promise<never>((_, reject) => {
+            timer = setTimeout(() => reject(new Error(`Timeout waiting for ${candidateModel}`)), 15000);
+          });
+          response = await Promise.race([genCall, timeoutCall]);
           if (response && response.text) break;
         } catch (err: any) {
-          const msg = String(err?.message || err || '');
-          const isQuotaOrDemand =
-            err?.status === 429 ||
-            err?.code === 429 ||
-            err?.status === 503 ||
-            err?.code === 503 ||
-            msg.includes('429') ||
-            msg.includes('503') ||
-            msg.includes('RESOURCE_EXHAUSTED') ||
-            msg.toLowerCase().includes('quota') ||
-            msg.toLowerCase().includes('high demand');
-
-          if (isQuotaOrDemand) {
-            if (mode === 'search') googleSearchCooldownUntil = Date.now() + 60_000;
-            modelCooldownUntil[candidateModel] = Date.now() + 30_000;
+          if (timer) clearTimeout(timer);
+          // If googleSearch tool caused 429, put googleSearch on cooldown and retry candidateModel without googleSearch tool
+          if (tools && isQuotaExceededError(err) && mode === 'search') {
+            googleSearchCooldownUntil = Date.now() + 120_000;
+            let retryTimer: NodeJS.Timeout | undefined;
+            try {
+              const retryCall = ai.models.generateContent({
+                model: candidateModel,
+                contents,
+                config: {
+                  systemInstruction: dynamicSystemInstruction,
+                  temperature: 0.5,
+                },
+              });
+              const retryTimeout = new Promise<never>((_, reject) => {
+                retryTimer = setTimeout(() => reject(new Error(`Timeout waiting for ${candidateModel}`)), 15000);
+              });
+              response = await Promise.race([retryCall, retryTimeout]);
+              if (response && response.text) break;
+            } catch (retryErr: any) {
+              engineErrors.push(retryErr);
+              if (isTransientModelError(retryErr)) {
+                modelCooldownUntil[candidateModel] = Date.now() + 15_000;
+              }
+            } finally {
+              if (retryTimer) clearTimeout(retryTimer);
+            }
+          } else {
+            engineErrors.push(err);
+            if (isModelNotFound(err)) {
+              modelCooldownUntil[candidateModel] = Date.now() + 10 * 60_000;
+            } else if (isTransientModelError(err)) {
+              modelCooldownUntil[candidateModel] = Date.now() + 15_000;
+            }
           }
+        } finally {
+          if (timer) clearTimeout(timer);
+        }
+      }
+
+      // Bi-directional failover: If all Gemini models failed or exhausted quota, automatically switch to DeepSeek
+      if ((!response || !response.text) && preferredProvider !== 'deepseek') {
+        const dsFallback = await callDeepSeekWithMeta(effectiveUserPrompt, {
+          systemInstruction: dynamicSystemInstruction,
+          temperature: mode === 'code' ? 0.2 : 0.5,
+          timeoutMs: 15000,
+        });
+        if (dsFallback.ok && dsFallback.text) {
+          response = { text: dsFallback.text, candidates: [] };
+          activeProvider = 'deepseek';
+          providerNotice = 'تم التحويل التلقائي إلى محرك DeepSeek البديل لضمان استمرارية الرد.';
+        } else if (dsFallback.errorMessage && !dsFallback.isMissingKey) {
+          engineErrors.push(new Error(dsFallback.errorMessage));
         }
       }
     });
 
     const candidate = response?.candidates?.[0];
-    const sources: Array<{ title: string; url: string }> = results.map(({ title, url }) => ({ title, url }));
+    const sources: Array<{ title: string; url: string }> = results
+      .filter((r) => Boolean(r.url))
+      .map(({ title, url }) => ({ title, url }));
     const seen = new Set<string>(sources.map((s) => s.url));
     for (const chunk of candidate?.groundingMetadata?.groundingChunks ?? []) {
       const url = chunk?.web?.uri;
@@ -1141,12 +1372,21 @@ app.post('/api/tidikelt/ask', aiRateLimiter, async (req: Request, res: Response)
       codeOutput = codeOutput || fb.codeOutput;
     }
 
-    const reconfirmed = analyzeAndReconfirmQuery(cleanPrompt, 'ar');
+    const failureKind = classifyEngineFailure(engineErrors, searchFailed || (route === 'web' && results.length === 0));
     const finalAskText =
       response?.text ??
       (mode === 'code'
         ? `### ⚡ استجابة تيديكلت AI (${mode})\n\nتمت معالجة وتشغيل الكود البرمجي بنجاح.`
-        : reconfirmed.confirmedFallbackText);
+        : buildClearEngineErrorMessage(failureKind, 'ar', searchFailed));
+
+    const postResult = await postprocessAssistantResponse({
+      conversationId: assistantPrep.conversationId,
+      userId: assistantPrep.userId,
+      rawUserQuery: rawPrompt,
+      assistantReplyText: finalAskText,
+      analysis: assistantPrep.analysis,
+      rawSources: sources,
+    });
 
     timings.totalMs = Math.round(performance.now() - startedAt);
     console.info(
@@ -1163,8 +1403,19 @@ app.post('/api/tidikelt/ask', aiRateLimiter, async (req: Request, res: Response)
       route,
       timings,
       sources,
+      enrichedSources: postResult.enrichedSources,
+      generatedFile: postResult.generatedFile,
+      conversation_id: postResult.conversationId,
+      intentAnalysis: {
+        correctedText: assistantPrep.analysis.correctedText,
+        intent: assistantPrep.analysis.intent,
+        explicitFileRequest: assistantPrep.analysis.explicitFileRequest,
+        requestedFileFormat: assistantPrep.analysis.requestedFileFormat,
+      },
       code,
       codeOutput,
+      provider: activeProvider,
+      notice: providerNotice,
     });
   } catch (err: any) {
     return res.status(500).json({ error: err?.message || 'Failed to process askTidikelt request' });
@@ -1200,18 +1451,31 @@ app.post('/api/ain-salah/ask', aiRateLimiter, async (req: Request, res: Response
       language = 'ar',
       userLocation = null,
       clientTemporalContext = null,
+      conversation_id,
+      user_id = 'default_user',
+      uploadedFiles = [],
     } = req.body;
 
-    if (!query && !image && !pdf) {
+    if (!query && !image && !pdf && (!Array.isArray(uploadedFiles) || uploadedFiles.length === 0)) {
       return res.status(400).json({ error: 'Query, image, or PDF is required.' });
     }
 
-    const effectiveQuery = (
+    const rawEffectiveQuery = (
       query ||
       (pdf
         ? 'لخص هذا المستند أو التقرير الإداري واستخرج أهم القرارات والشروط والتواريخ الواردة فيه.'
         : 'حلل هذه الصورة وأعطني تقريراً فورياً وتوجيهات السلامة والنجدة.')
     ).trim();
+
+    const assistantPrep = preprocessAssistantRequest({
+      rawQuery: rawEffectiveQuery,
+      conversationId: conversation_id,
+      userId: user_id,
+      clientHistory: Array.isArray(history) ? history : [],
+      uploadedFilesPayload: Array.isArray(uploadedFiles) ? uploadedFiles : [],
+    });
+
+    const effectiveQuery = assistantPrep.analysis.correctedText || rawEffectiveQuery;
 
     const route = chooseRoute(effectiveQuery, requestedMode);
     const resolvedMode: Exclude<TidikeltMode, 'auto'> =
@@ -1343,7 +1607,8 @@ ${liveTemporal.promptSection}
 ${internalTodaySection}${alertSection}
 ${recentNews ? `معلومات محلية حديثة:\n${recentNews}` : ''}
 ${recentFixes ? `تصحيحات سابقة:\n${recentFixes}` : ''}
-${ragContextPrompt}`;
+${ragContextPrompt}
+${assistantPrep.systemContextInjection ? `\n${assistantPrep.systemContextInjection}` : ''}`;
 
     const contents: any[] = [];
     if (recentHistory) {
@@ -1406,34 +1671,12 @@ ${ragContextPrompt}`;
       ? `\n[التوقيت الآن: ${liveTemporal.dzTime24} بتوقيت الجزائر | اليوم: ${liveTemporal.dayNameAr} ${liveTemporal.dzDateAr}م (${liveTemporal.hijriDateAr})]`
       : '';
 
-    contents.push({
-      text:
-        resolvedMode === 'code'
-          ? `${effectiveQuery}${temporalContextPrompt}\n(اكتب الكود ونفّذه واشرحه باختصار شديد بدون حشو).`
-          : `${effectiveQuery}${temporalContextPrompt}`,
-    });
+    const modelQueryText = assistantPrep.enrichedQueryForModel || effectiveQuery;
 
     let response: any;
     let usedModel = PRIMARY_GEMINI_MODEL;
     // Prioritize active Gemini models with immediate automatic failover
     const candidateModels = SUPPORTED_GEMINI_MODELS;
-
-    const nowMs = Date.now();
-    const isTransientModelError = (err: any): boolean => {
-      const msg = String(err?.message || err || '');
-      return (
-        err?.status === 429 ||
-        err?.code === 429 ||
-        err?.status === 503 ||
-        err?.code === 503 ||
-        msg.includes('429') ||
-        msg.includes('503') ||
-        msg.includes('RESOURCE_EXHAUSTED') ||
-        msg.toLowerCase().includes('quota') ||
-        msg.toLowerCase().includes('rate limit') ||
-        msg.toLowerCase().includes('high demand')
-      );
-    };
 
     // Tools activated based on resolvedMode (do NOT combine googleSearch and codeExecution in one request)
     const needsCodeExecution = !image && !pdf && resolvedMode === 'code';
@@ -1441,19 +1684,71 @@ ${ragContextPrompt}`;
       !image &&
       !pdf &&
       !needsCodeExecution &&
-      nowMs > googleSearchCooldownUntil &&
-      route === 'web';
+      (route === 'web' || requestedMode === 'search');
 
-    const targetTemperature = resolvedMode === 'code' ? 0.2 : 0.6;
+    const targetTemperature = resolvedMode === 'code' ? 0.2 : 0.5;
 
     let searchResults: Array<{ title: string; url: string; snippet: string }> = [];
-    if (route === 'web' && needsLiveWebSearch) {
-      searchResults = await measure('webSearchMs', () =>
-        searchWeb(effectiveQuery, { timeoutMs: 5000 })
-      );
+    let searchEncounteredError = false;
+    const simulatedFailure = req.body?.simulateFailure as EngineFailureKind | undefined;
+
+    if (needsLiveWebSearch && simulatedFailure !== 'search_failure') {
+      try {
+        searchResults = await measure('webSearchMs', () =>
+          searchWeb(effectiveQuery, { timeoutMs: 6000, preferLiveWeb: true })
+        );
+      } catch (sErr) {
+        console.warn('[Live search error in /api/ain-salah/ask]:', sErr);
+        searchEncounteredError = true;
+      }
+    } else if (simulatedFailure === 'search_failure') {
+      searchEncounteredError = true;
     }
 
+    // Build user prompt part with live search results injected when available, or transparency directive when search has no external results
+    const searchContextBlock =
+      searchResults.length > 0
+        ? `\n\n[نتائج ومصادر البحث المباشر المستخرجة الآن — اعتمد عليها للإجابة بدقة واذكر المعلومات الموثقة منها دون اختلاق روابط إضافية]:\n${searchResults
+            .map(
+              (r, idx) =>
+                `[${idx + 1}] العنوان: ${r.title}${r.url ? `\nالرابط: ${r.url}` : ''}\nالمحتوى: ${r.snippet}`
+            )
+            .join('\n\n')}`
+        : needsLiveWebSearch
+        ? `\n\n[ملاحظة سياقية مهمة: تعذّر الوصول إلى نتائج بحث ويب خارجية مباشرة في هذه اللحظة؛ أجب المستخدم بما يتوفر لديك من سياق ومعرفة مؤكدة، مع التصريح بوضوح في إجابتك عن أي تفاصيل آنية أو متغيرة لم يتسنَّ التحقق منها عبر مصدر مباشر الآن، ولا تختلق أي مصادر أو روابط].`
+        : '';
+
+    contents.push({
+      text: pdf
+        ? `${modelQueryText}${temporalContextPrompt}\n(لخص أهم النقاط في المستند أولا، ثم اسأل المستخدم وش يحب يتعمق فيه).`
+        : resolvedMode === 'code'
+        ? `${modelQueryText}${temporalContextPrompt}\n(اعط الكود جاهز مع شرح قصير جدا).`
+        : `${modelQueryText}${temporalContextPrompt}${searchContextBlock}`,
+    });
+
+    const engineErrors: any[] = [];
+    const hasExternalSearchUrls = searchResults.some((r) => /^https?:\/\//i.test(r.url));
+
     await measure('modelMs', async () => {
+      // Allow deterministic testing of all-engine failure modes when explicitly requested
+      if (simulatedFailure) {
+        if (simulatedFailure === 'quota_exceeded') {
+          engineErrors.push(Object.assign(new Error('429 RESOURCE_EXHAUSTED: Quota exceeded'), { status: 429 }));
+        } else if (simulatedFailure === 'timeout') {
+          engineErrors.push(new Error('Timeout waiting for AI engine response'));
+        } else if (simulatedFailure === 'search_failure') {
+          // Search failure alone: only fail all engines if forceAllEnginesFail is also true
+          if (req.body?.forceAllEnginesFail) {
+            return;
+          }
+        } else if (simulatedFailure === 'service_outage') {
+          engineErrors.push(Object.assign(new Error('503 Service Unavailable'), { status: 503 }));
+        }
+        if (simulatedFailure !== 'search_failure') {
+          return;
+        }
+      }
+
       for (const modelCandidate of candidateModels) {
         if ((modelCooldownUntil[modelCandidate] || 0) > Date.now()) {
           continue;
@@ -1461,6 +1756,7 @@ ${ragContextPrompt}`;
 
         // 1. Code Execution Mode attempt
         if (needsCodeExecution) {
+          let codeTimer: NodeJS.Timeout | undefined;
           try {
             const genPromiseCode = ai.models.generateContent({
               model: modelCandidate,
@@ -1471,25 +1767,35 @@ ${ragContextPrompt}`;
                 tools: [{ codeExecution: {} }],
               },
             });
-            const timeoutPromiseCode = new Promise((_, reject) =>
-              setTimeout(() => reject(new Error(`Timeout waiting for ${modelCandidate} with codeExecution`)), 22000)
-            );
+            const timeoutPromiseCode = new Promise<never>((_, reject) => {
+              codeTimer = setTimeout(
+                () => reject(new Error(`Timeout waiting for ${modelCandidate} with codeExecution`)),
+                15000
+              );
+            });
             response = await Promise.race([genPromiseCode, timeoutPromiseCode]);
             if (response && response.text) {
               usedModel = modelCandidate;
               break;
             }
           } catch (err: any) {
-            console.warn(`[Model Attempt Failed] ${modelCandidate} (codeExecution):`, err?.message || err);
-            if (isTransientModelError(err)) {
-              modelCooldownUntil[modelCandidate] = Date.now() + 30_000;
+            engineErrors.push(err);
+            if (isModelNotFound(err)) {
+              modelCooldownUntil[modelCandidate] = Date.now() + 10 * 60_000;
               continue;
             }
+            if (isTransientModelError(err)) {
+              modelCooldownUntil[modelCandidate] = Date.now() + 15_000;
+            }
+          } finally {
+            if (codeTimer) clearTimeout(codeTimer);
           }
         }
 
-        // 2. Search Grounding Mode attempt (never combined with codeExecution)
-        if (needsLiveWebSearch && Date.now() > googleSearchCooldownUntil && searchResults.length === 0) {
+        // 2. Search Grounding Mode attempt (only if live web search returned no external URLs and googleSearch tool is not in cooldown)
+        // Crucial: If googleSearch tool hits 429, only cooldown googleSearchCooldownUntil — do NOT cooldown modelCandidate!
+        if (needsLiveWebSearch && Date.now() > googleSearchCooldownUntil && !hasExternalSearchUrls) {
+          let searchTimer: NodeJS.Timeout | undefined;
           try {
             const genPromise = ai.models.generateContent({
               model: modelCandidate,
@@ -1500,25 +1806,31 @@ ${ragContextPrompt}`;
                 tools: [{ googleSearch: {} }],
               },
             });
-            const timeoutPromise = new Promise((_, reject) =>
-              setTimeout(() => reject(new Error(`Timeout waiting for ${modelCandidate} with search`)), 20000)
-            );
+            const timeoutPromise = new Promise<never>((_, reject) => {
+              searchTimer = setTimeout(
+                () => reject(new Error(`Timeout waiting for ${modelCandidate} with search`)),
+                14000
+              );
+            });
             response = await Promise.race([genPromise, timeoutPromise]);
             if (response && response.text) {
               usedModel = modelCandidate;
               break;
             }
           } catch (err: any) {
-            console.warn(`[Model Attempt Failed] ${modelCandidate} (search):`, err?.message || err);
-            if (isTransientModelError(err)) {
-              googleSearchCooldownUntil = Date.now() + 60_000;
-              modelCooldownUntil[modelCandidate] = Date.now() + 30_000;
+            if (isModelNotFound(err)) {
+              modelCooldownUntil[modelCandidate] = Date.now() + 10 * 60_000;
               continue;
             }
+            // Cooldown only the googleSearch tool, then fall through immediately to step 3 on the same modelCandidate
+            googleSearchCooldownUntil = Date.now() + 120_000;
+          } finally {
+            if (searchTimer) clearTimeout(searchTimer);
           }
         }
 
-        // 3. Standard Chat / Fallback attempt without external tools
+        // 3. Standard Chat / Grounded Context Synthesis attempt
+        let directTimer: NodeJS.Timeout | undefined;
         try {
           const genPromiseNoSearch = ai.models.generateContent({
             model: modelCandidate,
@@ -1528,91 +1840,144 @@ ${ragContextPrompt}`;
               temperature: targetTemperature,
             },
           });
-          const timeoutPromiseNoSearch = new Promise((_, reject) =>
-            setTimeout(() => reject(new Error(`Timeout waiting for ${modelCandidate}`)), 18000)
-          );
+          const timeoutPromiseNoSearch = new Promise<never>((_, reject) => {
+            directTimer = setTimeout(() => reject(new Error(`Timeout waiting for ${modelCandidate}`)), 15000);
+          });
           response = await Promise.race([genPromiseNoSearch, timeoutPromiseNoSearch]);
           if (response && response.text) {
             usedModel = modelCandidate;
             break;
           }
         } catch (fallbackErr: any) {
-          console.warn(`[Model Attempt Failed] ${modelCandidate} (direct):`, fallbackErr?.message || fallbackErr);
-          if (isTransientModelError(fallbackErr)) {
-            modelCooldownUntil[modelCandidate] = Date.now() + 30_000;
+          engineErrors.push(fallbackErr);
+          if (isModelNotFound(fallbackErr)) {
+            modelCooldownUntil[modelCandidate] = Date.now() + 10 * 60_000;
+            continue;
           }
+          if (isQuotaExceededError(fallbackErr)) {
+            modelCooldownUntil[modelCandidate] = Date.now() + 30_000;
+          } else if (isTransientModelError(fallbackErr)) {
+            modelCooldownUntil[modelCandidate] = Date.now() + 15_000;
+          }
+        } finally {
+          if (directTimer) clearTimeout(directTimer);
+        }
+      }
+
+      // 4. Bi-directional Automatic Failover to DeepSeek (`deepseek-chat`) when Gemini quota is exhausted or times out
+      if ((!response || !response.text) && !image && !pdf && !simulatedFailure) {
+        const dsPrompt = `${effectiveQuery}${searchContextBlock}`;
+        const dsFallback = await callDeepSeekWithMeta(dsPrompt, {
+          systemInstruction: systemPrompt,
+          temperature: targetTemperature,
+          timeoutMs: 15000,
+        });
+        if (dsFallback.ok && dsFallback.text) {
+          response = {
+            text: dsFallback.text,
+            candidates: [],
+            isDeepSeekFallback: true,
+            providerNotice:
+              'تم التحويل التلقائي إلى النموذج البديل (DeepSeek) نظراً لانشغال أو نفاد حصة النموذج الأساسي.',
+          };
+          usedModel = dsFallback.model;
+        } else if (dsFallback.errorMessage && !dsFallback.isMissingKey) {
+          engineErrors.push(new Error(dsFallback.errorMessage));
         }
       }
     });
 
     if (!response || !response.text) {
-      // Smart courteous conversational & analytical fallback when offline or quota-limited
+      const failureKind =
+        simulatedFailure ||
+        classifyEngineFailure(engineErrors, searchEncounteredError || (needsLiveWebSearch && searchResults.length === 0));
+
+      // Smart courteous conversational & analytical fallback when offline or quota-limited,
+      // and clear engine failure diagnostics when all engines fail
       const fallbackCleanText = (() => {
+        // If a specific failure simulation was requested, or if all engines failed on an open query,
+        // check deterministic local helpers first only when not explicitly simulating an engine error
         const q = effectiveQuery.trim();
 
-        // Direct Temporal Query Fallback (Always 100% accurate live clock response)
-        if (isTemporalQuery) {
-          if (language === 'en') {
-            return `Current time in Algeria (GMT+1): **${liveTemporal.dzTime24}** — **${liveTemporal.dayNameEn}, ${liveTemporal.dzDateAr}** (${liveTemporal.hijriDateAr}).`;
+        if (!simulatedFailure) {
+          // Direct Temporal Query Fallback (Always 100% accurate live clock response)
+          if (isTemporalQuery) {
+            if (language === 'en') {
+              return `Current time in Algeria (GMT+1): **${liveTemporal.dzTime24}** — **${liveTemporal.dayNameEn}, ${liveTemporal.dzDateAr}** (${liveTemporal.hijriDateAr}).`;
+            }
+            if (language === 'fr') {
+              return `Heure actuelle en Algérie (GMT+1) : **${liveTemporal.dzTime24}** — **${liveTemporal.dayNameFr}, ${liveTemporal.dzDateAr}** (${liveTemporal.hijriDateAr}).`;
+            }
+            return `الوقت الآن بتوقيت الجزائر (GMT+1): **${liveTemporal.dzTime24}** — **${liveTemporal.dayNameAr}، ${liveTemporal.dzDateAr}** (${liveTemporal.hijriDateAr}).`;
           }
-          if (language === 'fr') {
-            return `Heure actuelle en Algérie (GMT+1) : **${liveTemporal.dzTime24}** — **${liveTemporal.dayNameFr}, ${liveTemporal.dzDateAr}** (${liveTemporal.hijriDateAr}).`;
+
+          if (/^(السلام عليكم|سلام|سلام عليكم|مرحبا|أهلا|اهلين|أهلاً وسهلاً|صباح الخير|مساء الخير|هاي|هلا)/i.test(q)) {
+            if (language === 'en') return 'Hello! How can I help you today?';
+            if (language === 'fr') return "Bonjour ! Comment puis-je vous aider aujourd'hui ?";
+            return 'وعليكم السلام ورحمة الله! أهلاً بك، كيف يمكنني مساعدتك اليوم؟';
           }
-          return `الوقت الآن بتوقيت الجزائر (GMT+1): **${liveTemporal.dzTime24}** — **${liveTemporal.dayNameAr}، ${liveTemporal.dzDateAr}** (${liveTemporal.hijriDateAr}).`;
+          if (/كيف حالك|كيفك|شخبارك|أحوالك|labas|ça va|how are you/i.test(q)) {
+            if (language === 'en') return "I'm doing well, thank you! How can I help you?";
+            if (language === 'fr') return 'Je vais très bien, merci ! Comment puis-je vous aider ?';
+            return 'الحمد لله بخير، شكراً لك! كيف يمكنني مساعدتك؟';
+          }
+          if (/شكرا|شكراً|يعطيك العافية|بارك الله فيك|تسلم|merci|thank you|thanks/i.test(q)) {
+            if (language === 'en') return 'You are welcome!';
+            if (language === 'fr') return 'Je vous en prie !';
+            return 'على الرحب والسعة!';
+          }
+          if (resolvedMode === 'code') {
+            const fbCode = buildFallbackCodeExecution(q);
+            return fbCode.codeOutput;
+          }
+          // If live web search succeeded even though the LLM timed out/exhausted quota, present the real retrieved sources honestly
+          if (searchResults.length > 0) {
+            const topSnippets = searchResults
+              .slice(0, 3)
+              .map((r, i) => `${i + 1}. **${r.title}**: ${r.snippet}${r.url ? ` ([المصدر](${r.url}))` : ''}`)
+              .join('\n');
+            return `${buildClearEngineErrorMessage(failureKind, language, false)}\n\n**المعلومات المستخرجة من المصادر المتاحة حالياً:**\n${topSnippets}`;
+          }
+          if (
+            !needsLiveWebSearch &&
+            pipelineExecution.retrievedChunks &&
+            pipelineExecution.retrievedChunks.length > 0 &&
+            (pipelineExecution.retrievedChunks[0].score ?? 0) >= 0.55
+          ) {
+            const topChunk = pipelineExecution.retrievedChunks[0];
+            const fullDoc = getKnowledgeBase().find((k) => k.id === topChunk.id);
+            const kbContent = fullDoc?.content || topChunk.snippet;
+            return `${kbContent}\n\n*(ملاحظة: أُجيب من قاعدة المعرفة المحلية نظراً لتعذر الاتصال المؤقت بمحرك التوليد — ${buildClearEngineErrorMessage(failureKind, language, false)})*`;
+          }
+          const mathMatch = q.match(/^(\d+)\s*([\+\-\*\/])\s*(\d+)$/);
+          if (mathMatch) {
+            const a = Number(mathMatch[1]);
+            const op = mathMatch[2];
+            const b = Number(mathMatch[3]);
+            const ans = op === '+' ? a + b : op === '-' ? a - b : op === '*' ? a * b : b !== 0 ? a / b : 'غير معرف';
+            return `**${a} ${op} ${b} = ${ans}**`;
+          }
+          if (/من أنت|من انت|شكون أنت|شكون انت|عرف بنفسك|من هي تيديكلت|ما هي تيديكلت|ما هو تيديكلت|عرف تيديكلت/i.test(queryReconfirmation.normalizedQuery)) {
+            return `أنا مساعد تيديكلت AI، مساعد ذكي داخل تطبيق تيديكلت أساعدك في المحادثة، والبحث عن المعلومات، وتحليل المستندات، والبرمجة.`;
+          }
+          if (/من طورك|من هو مطور|من صنعك|مطور المنصة|DARTAGNAN/i.test(queryReconfirmation.normalizedQuery)) {
+            return `أنا مساعد تيديكلت AI داخل تطبيق تيديكلت، وقد تم تطوير التطبيق بواسطة **DARTAGNAN MAHMUOD**.`;
+          }
+          if (assistantPrep.immediateClarificationReply) {
+            return `${assistantPrep.immediateClarificationReply.text}\n\n${assistantPrep.immediateClarificationReply.options
+              .map((opt, idx) => `${idx + 1}. ${opt}`)
+              .join('\n')}`;
+          }
         }
 
-        if (/^(السلام عليكم|سلام|سلام عليكم|مرحبا|أهلا|اهلين|أهلاً وسهلاً|صباح الخير|مساء الخير|هاي|هلا)/i.test(q)) {
-          if (language === 'en') return 'Hello! How can I help you today?';
-          if (language === 'fr') return "Bonjour ! Comment puis-je vous aider aujourd'hui ?";
-          return 'وعليكم السلام ورحمة الله! أهلاً بك، كيف يمكنني مساعدتك اليوم؟';
-        }
-        if (/كيف حالك|كيفك|شخبارك|أحوالك|labas|ça va|how are you/i.test(q)) {
-          if (language === 'en') return "I'm doing well, thank you! How can I help you?";
-          if (language === 'fr') return 'Je vais très bien, merci ! Comment puis-je vous aider ?';
-          return 'الحمد لله بخير، شكراً لك! كيف يمكنني مساعدتك؟';
-        }
-        if (/شكرا|شكراً|يعطيك العافية|بارك الله فيك|تسلم|merci|thank you|thanks/i.test(q)) {
-          if (language === 'en') return 'You are welcome!';
-          if (language === 'fr') return 'Je vous en prie !';
-          return 'على الرحب والسعة!';
-        }
-        if (resolvedMode === 'code') {
-          const fbCode = buildFallbackCodeExecution(q);
-          return fbCode.codeOutput;
-        }
-        const sftMatch = getSftDataset().find(
-          (item) => item.query && (q.includes(item.query.slice(0, 18)) || item.query.includes(q.slice(0, 18)))
+        return buildClearEngineErrorMessage(
+          failureKind,
+          language,
+          searchEncounteredError || (needsLiveWebSearch && searchResults.length === 0)
         );
-        if (sftMatch) {
-          return sftMatch.response;
-        }
-        if (pipelineExecution.retrievedChunks && pipelineExecution.retrievedChunks.length > 0) {
-          const topChunk = pipelineExecution.retrievedChunks[0];
-          const fullDoc = getKnowledgeBase().find((k) => k.id === topChunk.id);
-          return fullDoc?.content || topChunk.snippet;
-        }
-        if (isWeatherOrTravelQuery) {
-          const alertLine =
-            weatherAlert && weatherAlert.active
-              ? `${weatherAlert.title}: ${weatherAlert.message}. `
-              : 'الأجواء مستقرة عموماً في عين صالح وإقليم تديكلت. ';
-          return `${alertLine}الطريق الوطني رقم 1 (RN1) سالك، ويُنصح بتفقد الوقود والمياه قبل السفر. للطوارئ: الحماية المدنية **14** أو الدرك الوطني **1055**.`;
-        }
-        const mathMatch = q.match(/^(\d+)\s*([\+\-\*\/])\s*(\d+)$/);
-        if (mathMatch) {
-          const a = Number(mathMatch[1]);
-          const op = mathMatch[2];
-          const b = Number(mathMatch[3]);
-          const ans = op === '+' ? a + b : op === '-' ? a - b : op === '*' ? a * b : b !== 0 ? a / b : 'غير معرف';
-          return `**${a} ${op} ${b} = ${ans}**`;
-        }
-        if (/من طورك|من هو مطور|من صنعك|مطور المنصة|DARTAGNAN|ما هي تيديكلت|ما هو تيديكلت|عرف تيديكلت|تعريف المنصة/i.test(queryReconfirmation.normalizedQuery)) {
-          return `**تيديكلت AI (Tidikelt AI)** هي منصة ذكاء اصطناعي مستقلة وشاملة، اسمها الداخلي والخارجي **تيديكلت AI**، ومطورها الرسمي هو **DARTAGNAN MAHMUOD**.\n\nالمنصة مستقلة تماماً وتحمل اسم «تيديكلت» كعلامة تقنية مستقلة فقط ولا تعني الإقليم الجغرافي، وتقدم خدمات المحادثة الذكية، تحليل الصور ومستندات PDF، تحويل النص إلى صوت، البحث المعرفي الموثق (RAG)، البرمجة وتنفيذ الأكواد، وأدوات المطورين والتدريب (API & Studio).`;
-        }
-        return queryReconfirmation.confirmedFallbackText;
       })();
 
-      response = { text: fallbackCleanText, isFallback: true };
+      response = { text: fallbackCleanText, isFallback: true, failureKind };
     }
 
     // Extract deduplicated live web search grounding metadata (sources & queries) and executableCode / codeExecutionResult
@@ -1717,12 +2082,31 @@ ${ragContextPrompt}`;
 
     const isFallbackResponse = Boolean(response?.isFallback);
 
+    const postResult = await postprocessAssistantResponse({
+      conversationId: assistantPrep.conversationId,
+      userId: assistantPrep.userId,
+      rawUserQuery: rawEffectiveQuery,
+      assistantReplyText: finalText,
+      analysis: assistantPrep.analysis,
+      rawSources: webSources,
+    });
+
     return res.json({
       text: finalText,
       mode: resolvedMode,
       route,
       timings,
       sources: webSources.slice(0, 6),
+      enrichedSources: postResult.enrichedSources,
+      generatedFile: postResult.generatedFile,
+      conversation_id: postResult.conversationId,
+      intentAnalysis: {
+        correctedText: assistantPrep.analysis.correctedText,
+        appliedCorrections: assistantPrep.analysis.appliedCorrections,
+        intent: assistantPrep.analysis.intent,
+        explicitFileRequest: assistantPrep.analysis.explicitFileRequest,
+        requestedFileFormat: assistantPrep.analysis.requestedFileFormat,
+      },
       code: executedCode,
       codeOutput: executedCodeOutput,
       agent: finalAgent,
@@ -1730,13 +2114,20 @@ ${ragContextPrompt}`;
       durationMs: durationMs,
       webSources: webSources.slice(0, 6),
       groundingQueries: groundingQueries.slice(0, 4),
+      notice: response?.providerNotice || null,
       sourceInfo: {
-        engine: isFallbackResponse ? 'ذاكرة النظام المحلية (Offline Fallback)' : 'Google Gemini',
+        engine: isFallbackResponse
+          ? 'ذاكرة النظام المحلية (Offline Fallback)'
+          : response?.isDeepSeekFallback
+          ? 'DeepSeek AI (التبديل التلقائي)'
+          : 'Google Gemini',
         model: isFallbackResponse ? 'local-fallback' : usedModel,
         isGrounded: !isFallbackResponse && (webSources.length > 0 || groundingQueries.length > 0),
         isFallback: isFallbackResponse,
         provider: isFallbackResponse
           ? 'ذاكرة النظام المحلية ومكتبة المعرفة'
+          : response?.isDeepSeekFallback
+          ? 'DeepSeek Chat (Failover Engine)'
           : resolvedMode === 'code'
           ? 'Google Gemini (Code Execution)'
           : resolvedMode === 'search'
@@ -1744,6 +2135,8 @@ ${ragContextPrompt}`;
           : 'Google Gemini (Direct Chat)',
         badgeTitle: isFallbackResponse
           ? 'إجابة من ذاكرة النظام الاحتياطية'
+          : response?.isDeepSeekFallback
+          ? 'تم التحويل التلقائي إلى النموذج البديل: DeepSeek Chat'
           : resolvedMode === 'code'
           ? 'وضع تنفيذ الكود البرمجي الفعلي: Google Gemini · Code Execution'
           : isResearchQuery
@@ -1764,7 +2157,7 @@ ${ragContextPrompt}`;
           year: liveTemporal.currentYear,
         },
       },
-      multiModelEngines: ['Google Gemini (بحث حي مباشر)', 'Gemini Flash 2.5', 'Google Search & Code Execution'],
+      multiModelEngines: ['Google Gemini (بحث حي مباشر)', 'Gemini 3.8 Flash', 'Google Search & Code Execution'],
       pipelineExecution,
     });
   } catch (error: any) {
@@ -2380,7 +2773,7 @@ app.post('/api/rag/upload-document', requireAdmin, async (req: Request, res: Res
       if (process.env.GEMINI_API_KEY && base64Data.length > 50) {
         try {
           const aiResponse = await ai.models.generateContent({
-            model: 'gemini-3.8-flash',
+            model: PRIMARY_GEMINI_MODEL,
             contents: [
               {
                 role: 'user',
@@ -2664,7 +3057,7 @@ app.post('/api/ain-salah/daily-ticker', async (req: Request, res: Response) => {
       : 'طقس صحراوي مستقر في عين صالح وإقليم تديكلت · الطرق الوطنية RN1 و RN52 سالكة · طوارئ: 14 / 1055';
 
     // If models are currently in quota cooldown, return instant deterministic summary without burning quota
-    if ((modelCooldownUntil['gemini-3.1-flash-lite'] || 0) > Date.now()) {
+    if ((modelCooldownUntil[PRIMARY_GEMINI_MODEL] || 0) > Date.now()) {
       dailyTickerCache = { summary: fallbackSummary, key: cacheKey, updatedAt: Date.now() };
       return res.json({
         tickerSummary: fallbackSummary,
@@ -2696,7 +3089,7 @@ ${newsList || 'لا توجد أخبار محلية جديدة اليوم.'}
 }`;
 
     const response = await ai.models.generateContent({
-      model: 'gemini-3.1-flash-lite',
+      model: PRIMARY_GEMINI_MODEL,
       contents: prompt,
       config: {
         responseMimeType: 'application/json',
@@ -2720,7 +3113,7 @@ ${newsList || 'لا توجد أخبار محلية جديدة اليوم.'}
       updatedAt: Date.now(),
     });
   } catch (error: any) {
-    modelCooldownUntil['gemini-3.1-flash-lite'] = Date.now() + 60_000;
+    modelCooldownUntil[PRIMARY_GEMINI_MODEL] = Date.now() + 15_000;
     const fallbackSummary = req.body?.weatherAlert?.title
       ? `${req.body.weatherAlert.title} · ${req.body.weatherAlert.message} · طوارئ: 14 / 1055`
       : 'طقس صحراوي مستقر في عين صالح وإقليم تديكلت · طرق سالكة وآمنة · طوارئ: 14 / 1055';
@@ -2913,30 +3306,74 @@ async function handleChatStream(req: Request, res: Response) {
         res.write(`data: ${JSON.stringify({ text })}\n\n`);
       }
     } else {
-      const model = 'gemini-2.5-flash';
       const formattedGeminiContents = messages.map((m: any) => ({
         role: (m.role === 'assistant' || m.role === 'model' || m.role === 'bot') ? 'model' : 'user',
         parts: [{ text: String(m.content || m.text || '') }],
       }));
 
-      const responseStream = await ai.models.generateContentStream({
-        model,
-        contents: formattedGeminiContents.length > 0 ? formattedGeminiContents : latestContent,
-        config: {
-          systemInstruction: sourcesContext
-            ? `أنت مساعد ذكي لمنطقة تيديكلت وعين صالح. المصادر المعتمدة:\n${sourcesContext}\nاستند إلى المصادر مع الإشارة إليها بدقة.`
-            : `أنت مساعد ذكي لمنطقة تيديكلت وعين صالح. أجب بدقة واختصار.`,
-          maxOutputTokens: 450,
-        },
-      });
+      const streamSystemInstruction = sourcesContext
+        ? `${TIDIKELT_SYSTEM_INSTRUCTION}\n\nالمصادر المعتمدة:\n${sourcesContext}\nاستند إلى المصادر مع الإشارة إليها بدقة.`
+        : TIDIKELT_SYSTEM_INSTRUCTION;
 
-      for await (const chunk of responseStream) {
-        const text = chunk.text;
-        if (!text) continue;
+      let geminiStreamSucceeded = false;
+      for (const candidateModel of SUPPORTED_GEMINI_MODELS) {
+        if ((modelCooldownUntil[candidateModel] || 0) > Date.now()) continue;
+        try {
+          const responseStream = await ai.models.generateContentStream({
+            model: candidateModel,
+            contents: formattedGeminiContents.length > 0 ? formattedGeminiContents : latestContent,
+            config: {
+              systemInstruction: streamSystemInstruction,
+            },
+          });
 
-        if (firstTokenAt === null) firstTokenAt = Date.now();
+          for await (const chunk of responseStream) {
+            const text = chunk.text;
+            if (!text) continue;
 
-        res.write(`data: ${JSON.stringify({ text })}\n\n`);
+            if (firstTokenAt === null) firstTokenAt = Date.now();
+            geminiStreamSucceeded = true;
+            res.write(`data: ${JSON.stringify({ text })}\n\n`);
+          }
+
+          if (geminiStreamSucceeded) break;
+        } catch (streamErr: any) {
+          modelCooldownUntil[candidateModel] = Date.now() + 30_000;
+        }
+      }
+
+      // Bi-directional failover to DeepSeek streaming if Gemini models fail or hit quota
+      if (!geminiStreamSucceeded) {
+        const dsMessages = messages.map((m: any) => ({
+          role: (m.role === 'model' || m.role === 'assistant' || m.role === 'bot'
+            ? 'assistant'
+            : m.role === 'system'
+            ? 'system'
+            : 'user') as 'system' | 'user' | 'assistant',
+          content: String(m.content || m.text || ''),
+        }));
+        if (streamSystemInstruction) {
+          dsMessages.unshift({ role: 'system', content: streamSystemInstruction });
+        }
+
+        let dsYielded = false;
+        for await (const dsToken of streamDeepSeekChat(latestContent, { messages: dsMessages })) {
+          if (firstTokenAt === null) {
+            firstTokenAt = Date.now();
+            res.write(
+              `data: ${JSON.stringify({
+                notice: 'تم التحويل التلقائي إلى النموذج البديل (DeepSeek) لضمان استمرارية المحادثة.',
+                provider: 'deepseek',
+              })}\n\n`
+            );
+          }
+          dsYielded = true;
+          res.write(`data: ${JSON.stringify({ text: dsToken })}\n\n`);
+        }
+
+        if (!dsYielded) {
+          throw new Error('تعذر البث من كلٍ من Gemini و DeepSeek.');
+        }
       }
     }
 
@@ -3026,7 +3463,7 @@ app.post('/api/chat', aiRateLimiter, async (req: Request, res: Response) => {
 
     if (route === 'web' && req.body.searchResults === undefined) {
       const fetchedWeb = await measure('webSearchMs', () =>
-        searchWeb(rawMessage, { timeoutMs: 5000 })
+        searchWeb(rawMessage, { timeoutMs: 6000, preferLiveWeb: true })
       );
       searchResults = cleanItems(
         fetchedWeb.map((item, idx) => ({
@@ -3038,7 +3475,7 @@ app.post('/api/chat', aiRateLimiter, async (req: Request, res: Response) => {
       );
     }
 
-    // لا ندّعي البحث الحي إن لم تصل نتائج بحث فعلية من مزوّد البحث.
+    // لا ندّعي البحث الحي إن لم تصل نتائج بحث فعلية عندما يمرر العميل مصفوفة نتائج فارغة صراحةً للاختبار
     if (mode === 'search' && searchResults.length === 0 && req.body.searchResults !== undefined) {
       timings.totalMs = Math.round(performance.now() - startedAt);
       return res.status(424).json({
@@ -3052,7 +3489,7 @@ app.post('/api/chat', aiRateLimiter, async (req: Request, res: Response) => {
       });
     }
 
-    const sources = mode === 'search' && searchResults.length > 0 ? searchResults : knowledge;
+    let sources = mode === 'search' && searchResults.length > 0 ? searchResults : knowledge;
 
     const requestedStyle = req.body.replyStyle || req.body.style || req.body.dialect;
     const resolvedStyle =
@@ -3060,16 +3497,36 @@ app.post('/api/chat', aiRateLimiter, async (req: Request, res: Response) => {
         ? requestedStyle
         : (['en', 'fr'].includes(req.body.language) ? null : detectDialectStyle(rawMessage));
 
-    // Handle specific factual queries where knowledge is absent or empty (abstention behavior)
+    // Handle specific factual queries where local knowledge is empty: try live web search first if not explicitly overridden
     const isLocalSpecificInquiry =
       /صيدلية معينة|هاتف صيدلية|رقم هاتف صيدلية|عنوان صيدلية|صيدلية في عين صالح|محل معين|شخص معين/i.test(rawMessage) ||
       (/رقم هاتف/i.test(rawMessage) && sources.length === 0);
 
-    if (sources.length === 0 && isLocalSpecificInquiry) {
+    if (sources.length === 0 && isLocalSpecificInquiry && req.body.knowledge === undefined && req.body.searchResults === undefined) {
+      try {
+        const liveTry = await measure('webSearchMs', () =>
+          searchWeb(rawMessage, { timeoutMs: 4500, preferLiveWeb: true })
+        );
+        if (liveTry.length > 0) {
+          sources = cleanItems(
+            liveTry.map((item, idx) => ({
+              id: `web-${idx + 1}`,
+              title: item.title,
+              url: item.url,
+              text: item.snippet,
+            }))
+          );
+        }
+      } catch {
+        // ignore search error and let abstention or context notice handle it
+      }
+    }
+
+    if (sources.length === 0 && isLocalSpecificInquiry && (req.body.knowledge !== undefined || sources.length === 0)) {
       const abstentionText =
         resolvedStyle === 'ar-dz'
-          ? 'ما لقيتش معلومة موثوقة على هذا في المصادر المتاحة.'
-          : 'لم أجد معلومة موثوقة حول هذا في المصادر المتاحة.';
+          ? 'ما لقيتش معلومة موثوقة ومؤكدة على هاد الرقم أو العنوان المحدد في المصادر المتاحة حالياً (للطوارئ الطبية اتصل بالحماية المدنية 14).'
+          : 'لم أجد معلومة موثوقة ومؤكدة حول هذا الرقم أو العنوان المحدد في المصادر المتاحة حالياً (للطوارئ الطبية يُرجى الاتصال بالحماية المدنية على الرقم 14).';
 
       timings.totalMs = Math.round(performance.now() - startedAt);
       console.info(
@@ -3115,6 +3572,8 @@ app.post('/api/chat', aiRateLimiter, async (req: Request, res: Response) => {
 
     const userContent = sources.length
       ? `السؤال:\n${rawMessage.trim()}\n\nالمصادر المتاحة:\n${contextText}`
+      : mode === 'search'
+      ? `${rawMessage.trim()}\n\n(ملاحظة: تعذّر الوصول إلى مصادر ويب خارجية مباشرة حالياً؛ أجب بما يتوفر من معرفة مؤكدة مع التنويه بوضوح عن أي معلومة آنية غير متحقق منها، ولا تختلق روابط أو مصادر).`
       : rawMessage.trim();
 
     const replyStyle = resolvedStyle || 'ar';
@@ -3179,6 +3638,16 @@ app.post('/api/chat', aiRateLimiter, async (req: Request, res: Response) => {
       });
 
       if (!streamed) {
+        for await (const dsChunk of streamDeepSeekChat(userContent.trim(), {
+          messages: messages as any,
+          temperature,
+        })) {
+          streamed = true;
+          res.write(`data: ${JSON.stringify({ text: dsChunk, chunk: dsChunk, provider: 'deepseek' })}\n\n`);
+        }
+      }
+
+      if (!streamed) {
         res.write(`data: ${JSON.stringify({ text: 'تعذّر الاتصال بمحرك الذكاء الاصطناعي. حاول لاحقًا.' })}\n\n`);
       }
 
@@ -3194,6 +3663,10 @@ app.post('/api/chat', aiRateLimiter, async (req: Request, res: Response) => {
       res.write(`data: [DONE]\n\n`);
       return res.end();
     }
+
+    let providerNotice: string | null = null;
+    let activeProvider: 'gemini' | 'deepseek' = 'gemini';
+    const preferredProvider = req.body?.preferredProvider || req.body?.provider;
 
     let answerText = await measure('modelMs', async () => {
       let generated = '';
@@ -3220,6 +3693,24 @@ app.post('/api/chat', aiRateLimiter, async (req: Request, res: Response) => {
         const data: any = await response.json();
         generated = data?.choices?.[0]?.message?.content?.trim() || '';
       } else {
+        // 1. If DeepSeek was explicitly requested as primary provider, try it first and silently fall back to Gemini on 402/missing key
+        if (preferredProvider === 'deepseek') {
+          const dsPrimary = await callDeepSeekWithMeta(userContent.trim(), {
+            messages: messages as any,
+            temperature,
+          });
+          if (dsPrimary.ok && dsPrimary.text) {
+            activeProvider = 'deepseek';
+            return dsPrimary.text;
+          }
+          providerNotice = dsPrimary.isBalanceExhausted
+            ? 'نفد رصيد حساب DeepSeek (402)، تم التحويل التلقائي الصامت إلى النموذج البديل (Gemini).'
+            : dsPrimary.isMissingKey
+            ? 'لم يتم ضبط DEEPSEEK_API_KEY بعد، تم التحويل التلقائي إلى النموذج البديل (Gemini).'
+            : 'تعذر الاتصال بـ DeepSeek، تم التحويل التلقائي إلى النموذج البديل (Gemini).';
+        }
+
+        // 2. Try Gemini candidate models
         for (const mCandidate of candidateModels) {
           if ((modelCooldownUntil[mCandidate] || 0) > Date.now()) continue;
           try {
@@ -3233,11 +3724,25 @@ app.post('/api/chat', aiRateLimiter, async (req: Request, res: Response) => {
             });
             if (response && response.text) {
               generated = response.text.trim();
+              activeProvider = 'gemini';
               break;
             }
           } catch (genErr: any) {
             console.warn(`[Gemini generate error for ${mCandidate}]:`, genErr?.message || genErr);
             modelCooldownUntil[mCandidate] = Date.now() + 30_000;
+          }
+        }
+
+        // 3. Bi-directional Failover: If all Gemini models failed or exhausted quota, silently switch to DeepSeek
+        if (!generated && preferredProvider !== 'deepseek') {
+          const dsFallback = await callDeepSeekWithMeta(userContent.trim(), {
+            messages: messages as any,
+            temperature,
+          });
+          if (dsFallback.ok && dsFallback.text) {
+            generated = dsFallback.text;
+            activeProvider = 'deepseek';
+            providerNotice = 'تم التحويل التلقائي إلى النموذج البديل (DeepSeek) نظراً لنفاد حصة أو انشغال النموذج الأساسي.';
           }
         }
       }
@@ -3302,6 +3807,8 @@ app.post('/api/chat', aiRateLimiter, async (req: Request, res: Response) => {
       facts,
       citedSourceIds,
       sources: sources.map(({ id, title, url }) => ({ id, title, url })),
+      provider: activeProvider,
+      notice: providerNotice,
     });
   } catch (err: any) {
     console.error('Chat route failed:', err?.message || err);
@@ -3402,7 +3909,7 @@ app.post('/api/tool-execute', aiRateLimiter, async (req: Request, res: Response)
 
     const activeModel =
       (modelCooldownUntil[PRIMARY_GEMINI_MODEL] || 0) > Date.now()
-        ? 'gemini-flash-latest'
+        ? 'gemini-3.1-flash-lite-preview'
         : PRIMARY_GEMINI_MODEL;
 
     const response = await ai.models.generateContent({
@@ -3562,7 +4069,7 @@ function sendSSEEvent(res: Response, event: string, payload: any) {
 // أعد عناصر بصيغة: [{ title, url, snippet }]
 async function searchWeb(
   query: string,
-  optionsOrSignal?: AbortSignal | { signal?: AbortSignal; timeoutMs?: number }
+  optionsOrSignal?: AbortSignal | { signal?: AbortSignal; timeoutMs?: number; preferLiveWeb?: boolean }
 ): Promise<Array<{ title: string; url: string; snippet: string }>> {
   const signal =
     optionsOrSignal && 'aborted' in optionsOrSignal
@@ -3571,18 +4078,25 @@ async function searchWeb(
   const timeoutMs =
     optionsOrSignal && !('aborted' in optionsOrSignal) && typeof optionsOrSignal.timeoutMs === 'number'
       ? optionsOrSignal.timeoutMs
-      : 5000;
+      : 5500;
+  const preferLiveWeb =
+    (optionsOrSignal && !('aborted' in optionsOrSignal) && Boolean(optionsOrSignal.preferLiveWeb)) ||
+    routeQuestion(query).mode === 'web';
 
-  const results: Array<{ title: string; url: string; snippet: string }> = [];
+  const localResults: Array<{ title: string; url: string; snippet: string }> = [];
+  const webResults: Array<{ title: string; url: string; snippet: string }> = [];
+  const seenUrls = new Set<string>();
 
-  // 1. فحص قاعدة المعرفة المحلية المعتمدة أولاً (RAG Semantic Search)
+  // 1. فحص قاعدة المعرفة المحلية للعناصر ذات الصلة الفعلية فقط (بدون حجب البحث المباشر)
   try {
-    const kbMatches = searchKnowledgeBase(query, 5);
+    const kbMatches = searchKnowledgeBase(query, 4);
     for (const match of kbMatches) {
+      // Only include genuinely matching local KB items (score >= 0.52)
+      if ((match.score ?? 0) < 0.52) continue;
       const isHttp = match.chunk.source && /^https?:\/\//i.test(match.chunk.source);
       const srcUrl = isHttp ? match.chunk.source : '';
 
-      results.push({
+      localResults.push({
         title: match.chunk.title || 'مصدر تيديكلت AI المعتمد',
         url: srcUrl,
         snippet: match.snippet || match.chunk.content.slice(0, 280),
@@ -3592,10 +4106,31 @@ async function searchWeb(
     console.error('KB search error in searchWeb:', err);
   }
 
-  // 2. البحث الحي المباشر عبر Google Search Grounding إن كان الوقت متاحاً
-  if (Date.now() > googleSearchCooldownUntil && !signal?.aborted) {
+  // 2. البحث الحي الفعلي عبر الويب (Open-Meteo للطقس، Google News RSS للمستجدات، DuckDuckGo HTML، وويكيبيديا)
+  if (!signal?.aborted && (preferLiveWeb || localResults.length === 0)) {
+    try {
+      const liveItems = await searchLiveWebSources(query, timeoutMs);
+      for (const item of liveItems) {
+        if (item.url && !seenUrls.has(item.url.toLowerCase())) {
+          seenUrls.add(item.url.toLowerCase());
+          webResults.push({
+            title: item.title,
+            url: item.url,
+            snippet: item.snippet,
+          });
+        }
+      }
+    } catch (liveErr) {
+      console.warn('Live web search providers error:', liveErr);
+    }
+  }
+
+  // 3. البحث الحي عبر Google Search Grounding إن لم تتوفر نتائج ويب كافية ولم تكن الأداة في فترة تهدئة
+  // ملاحظة مهمة: عند حدوث 429 في أداة googleSearch، نضع googleSearchCooldownUntil فقط ولا نعطل النموذج نفسه!
+  if (webResults.length === 0 && Date.now() > googleSearchCooldownUntil && !signal?.aborted) {
     for (const modelCandidate of SUPPORTED_GEMINI_MODELS) {
       if ((modelCooldownUntil[modelCandidate] || 0) > Date.now()) continue;
+      let timer: NodeJS.Timeout | undefined;
       try {
         const searchPromise = ai.models.generateContent({
           model: modelCandidate,
@@ -3605,9 +4140,9 @@ async function searchWeb(
             temperature: 0.2,
           },
         });
-        const timeoutPromise = new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error(`Web search timed out after ${timeoutMs}ms`)), timeoutMs)
-        );
+        const timeoutPromise = new Promise<never>((_, reject) => {
+          timer = setTimeout(() => reject(new Error(`Web search timed out after ${timeoutMs}ms`)), timeoutMs);
+        });
         const searchResp = await Promise.race([searchPromise, timeoutPromise]);
 
         const candidate = searchResp.candidates?.[0];
@@ -3616,13 +4151,13 @@ async function searchWeb(
           for (let i = 0; i < gMetadata.groundingChunks.length; i++) {
             const chunk = gMetadata.groundingChunks[i] as any;
             const web = chunk?.web;
-            if (web && web.uri) {
-              // Extract distinct snippet per source rather than cloning the candidate text
+            if (web && web.uri && !seenUrls.has(String(web.uri).toLowerCase())) {
+              seenUrls.add(String(web.uri).toLowerCase());
               const distinctSnippet =
                 (chunk.text && typeof chunk.text === 'string' && chunk.text.trim()) ||
                 (web.title ? `مصدر بحث معتمد: ${web.title}` : 'مصدر بحث Google المعتمد');
 
-              results.push({
+              webResults.push({
                 title: web.title || 'مصدر بحث Google',
                 url: web.uri,
                 snippet: distinctSnippet,
@@ -3630,34 +4165,21 @@ async function searchWeb(
             }
           }
         }
-        if (results.length > 0) break;
-      } catch (err: any) {
-        googleSearchCooldownUntil = Date.now() + 45_000;
-        modelCooldownUntil[modelCandidate] = Date.now() + 30_000;
+        if (webResults.length > 0) break;
+      } catch {
+        // Cooldown only googleSearch tool, do NOT poison modelCooldownUntil[modelCandidate]
+        googleSearchCooldownUntil = Date.now() + 120_000;
+        break;
+      } finally {
+        if (timer) clearTimeout(timer);
       }
     }
   }
 
-  // في حال عدم توفر نتائج متطابقة، استرجاع المصادر الموضوعية العامة دون إقحام بطاقة تعريف المطور
-  if (results.length === 0) {
-    const isAskingAboutPlatformOrDev =
-      /مطور|من طور|من صنع|DARTAGNAN|منصة تيديكلت|تطبيق تيديكلت|Tidikelt AI/i.test(query);
-    const kbAll = getKnowledgeBase().filter(
-      (k) => isAskingAboutPlatformOrDev || (k.id !== 'kb_doc_6' && !/DARTAGNAN/i.test(k.title || ''))
-    );
-    if (kbAll.length > 0) {
-      for (const k of kbAll.slice(0, 3)) {
-        const isHttp = k.source && /^https?:\/\//i.test(k.source);
-        results.push({
-          title: k.title || 'مصدر معرفي معتمد',
-          url: isHttp ? k.source : '',
-          snippet: k.content.slice(0, 250),
-        });
-      }
-    }
-  }
-
-  return results;
+  // ترتيب النتائج: إذا كان السؤال يحتاج إلى معلومات حديثة (preferLiveWeb)، نضع نتائج الويب الحية أولاً ثم المحلية ذات الصلة
+  return preferLiveWeb
+    ? [...webResults, ...localResults].slice(0, 6)
+    : [...localResults, ...webResults].slice(0, 6);
 }
 
 // مراجعة أولية: إزالة النتائج الناقصة والمكررة.
@@ -3708,9 +4230,15 @@ async function* streamAnswer(
     .map((source, index) => `[${index + 1}] ${source.title}\n${source.url}\n${source.snippet}`)
     .join('\n\n');
 
-  const systemInstruction = `${makeSystemPrompt('ar').trim()}\n- اعتمد على المصادر المرفقة للمعلومات التي تتطلب بحثًا وأضف أرقام المصادر مثل [1] عند الاستناد إليها.`;
+    const systemInstruction =
+      sources.length > 0
+        ? `${makeSystemPrompt('ar').trim()}\n- اعتمد على المصادر المرفقة للمعلومات التي تتطلب بحثًا وأضف أرقام المصادر مثل [1] عند الاستناد إليها.`
+        : `${makeSystemPrompt('ar').trim()}\n- إذا لم تتوفر مصادر بحث خارجية مرفقة، أجب بما يتوفر من معرفة مؤكدة مع التصريح بوضوح عن أي معلومات حديثة لم يتسنَّ التحقق منها عبر مصدر مباشر، ولا تختلق أي روابط أو مصادر.`;
 
-  const userPromptText = `السؤال:\n${query}\n\nالمصادر:\n${sourceText}`;
+    const userPromptText =
+      sources.length > 0
+        ? `السؤال:\n${query}\n\nالمصادر:\n${sourceText}`
+        : `السؤال:\n${query}\n\n(ملاحظة: لم تتوفر روابط مصادر خارجية مباشرة في هذه اللحظة؛ قدّم الإجابة في حدود المعرفة المؤكدة وصرّح بوضوح عن أي تفاصيل آنية غير متحقق منها).`;
 
   // If AI_API_KEY (OpenAI compatible endpoint) is explicitly set and configured
   const AI_API_KEY = process.env.AI_API_KEY;
@@ -3774,14 +4302,7 @@ async function* streamAnswer(
   }
 
   // Primary resilient Gemini engine streaming via GoogleGenAI SDK
-  const candidateModels = [
-    'gemini-3.8-flash',
-    'gemini-3.6-flash',
-    'gemini-3.5-flash',
-    'gemini-3.5-flash-lite',
-    'gemini-3-flash-preview',
-    'gemini-3.1-flash-lite',
-  ];
+  const candidateModels = SUPPORTED_GEMINI_MODELS;
 
   let streamResp: any = null;
   for (const mCandidate of candidateModels) {
@@ -3901,14 +4422,8 @@ app.post('/api/search-stream', async (req: Request, res: Response) => {
 
     results = verifySourceMetadata(results || []);
 
-    if (results.length === 0) {
-      sendSSEEvent(res, 'error', {
-        message: 'لم نجد مصادر مناسبة؛ لم نتمكن من إعداد إجابة موثوقة.',
-      });
-      return;
-    }
-
-    const sourceFingerprint = results
+    // إذا لم تتوفر روابط خارجية، لا نوقف المحادثة بخطأ عام؛ نمرر مصفوفة مصادر فارغة وندع النموذج يجيب مع التنويه عن حالة المصادر دون اختلاق روابط
+    const sourceFingerprint = (results || [])
       .map((source: any) => ({
         url: source.url,
         updatedAt: source.updatedAt || '',
@@ -4295,6 +4810,8 @@ app.post('/api/global-settings', requireAdmin, (req: Request, res: Response) => 
   writeGlobalOwnerSettings(cachedGlobalSettings);
   return res.json(cachedGlobalSettings);
 });
+
+app.use(errorHandler);
 
 // Setup Vite middleware for development or static serving for production
 async function startServer() {

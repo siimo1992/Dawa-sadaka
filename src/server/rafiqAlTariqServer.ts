@@ -643,7 +643,7 @@ export function registerRafiqAlTariqRoutes(app: Express, ai: GoogleGenAI) {
 
       try {
         const response = await ai.models.generateContent({
-          model: 'gemini-3.8-flash',
+          model: 'gemini-3-flash-preview',
           contents: conversationContents,
           config: {
             systemInstruction: RAFIQ_SYSTEM_INSTRUCTION,

@@ -10657,5 +10657,113 @@
     "durationMs": 2278,
     "type": "text",
     "preview": "ما هي عاصمة الجزائر؟ أجب بالاسم فقط."
+  },
+  {
+    "id": "q_1792767587939_cle8",
+    "timestamp": "2026-10-23T14:59:47.939Z",
+    "date": "2026-10-23",
+    "agentId": "research",
+    "agentName": "الباحث الأكاديمي والمعرفي",
+    "agentEmoji": "🎓",
+    "durationMs": 12856,
+    "type": "text",
+    "preview": "Love you❤",
+    "isDemo": false
+  },
+  {
+    "id": "q_1792781141744_dwrh",
+    "timestamp": "2026-10-23T18:45:41.744Z",
+    "date": "2026-10-23",
+    "agentId": "research",
+    "agentName": "الباحث الأكاديمي والمعرفي",
+    "agentEmoji": "🎓",
+    "durationMs": 3632,
+    "type": "text",
+    "preview": "اشرح باختصار ما هي الخوارزمية في البرمجة؟",
+    "isDemo": false
+  },
+  {
+    "id": "q_1792781146242_id93",
+    "timestamp": "2026-10-23T18:45:46.242Z",
+    "date": "2026-10-23",
+    "agentId": "research",
+    "agentName": "الباحث الأكاديمي والمعرفي",
+    "agentEmoji": "🎓",
+    "durationMs": 4476,
+    "type": "text",
+    "preview": "ما هي أهم معالم واحات عين صالح ومنطقة تيديكلت وأرقام الطوارئ المحلية؟",
+    "isDemo": false
+  },
+  {
+    "id": "q_1792781161130_id09",
+    "timestamp": "2026-10-23T18:46:01.130Z",
+    "date": "2026-10-23",
+    "agentId": "research",
+    "agentName": "الباحث الأكاديمي والمعرفي",
+    "agentEmoji": "🎓",
+    "durationMs": 14877,
+    "type": "text",
+    "preview": "ما هي حالة الطقس ودرجة الحرارة الآن في عين صالح اليوم؟",
+    "isDemo": false
+  },
+  {
+    "id": "q_1792781168231_v9vu",
+    "timestamp": "2026-10-23T18:46:08.231Z",
+    "date": "2026-10-23",
+    "agentId": "research",
+    "agentName": "الباحث الأكاديمي والمعرفي",
+    "agentEmoji": "🎓",
+    "durationMs": 6528,
+    "type": "text",
+    "preview": "ابحث عن آخر أخبار ومستجدات الجزائر اليوم",
+    "isDemo": false
+  },
+  {
+    "id": "q_1792781169690_bfyp",
+    "timestamp": "2026-10-23T18:46:09.690Z",
+    "date": "2026-10-23",
+    "agentId": "research",
+    "agentName": "الباحث الأكاديمي والمعرفي",
+    "agentEmoji": "🎓",
+    "durationMs": 12,
+    "type": "text",
+    "preview": "اشرح نظرية النسبية",
+    "isDemo": false
+  },
+  {
+    "id": "q_1792781169704_bu16",
+    "timestamp": "2026-10-23T18:46:09.704Z",
+    "date": "2026-10-23",
+    "agentId": "research",
+    "agentName": "الباحث الأكاديمي والمعرفي",
+    "agentEmoji": "🎓",
+    "durationMs": 7,
+    "type": "text",
+    "preview": "اشرح نظرية النسبية",
+    "isDemo": false
+  },
+  {
+    "id": "q_1792781169714_xvc8",
+    "timestamp": "2026-10-23T18:46:09.714Z",
+    "date": "2026-10-23",
+    "agentId": "research",
+    "agentName": "الباحث الأكاديمي والمعرفي",
+    "agentEmoji": "🎓",
+    "durationMs": 4,
+    "type": "text",
+    "preview": "اشرح نظرية النسبية",
+    "isDemo": false
+  },
+  {
+    "id": "q_1792781175904_o8je",
+    "timestamp": "2026-10-23T18:46:15.904Z",
+    "date": "2026-10-23",
+    "agentId": "research",
+    "agentName": "الباحث الأكاديمي والمعرفي",
+    "agentEmoji": "🎓",
+    "durationMs": 6185,
+    "type": "text",
+    "preview": "ما هي آخر أخبار الفضاء اليوم؟",
+    "isDemo": false
   }
 ]

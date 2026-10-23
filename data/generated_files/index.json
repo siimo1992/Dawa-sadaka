@@ -1,0 +1,39 @@
+{
+  "abc6bc47d2cdca1c": {
+    "id": "abc6bc47d2cdca1c",
+    "filename": "لبدياف.pdf",
+    "format": "pdf",
+    "mimeType": "application/pdf",
+    "sizeBytes": 1096,
+    "createdAt": "2026-10-23T16:31:17.046Z",
+    "downloadUrl": "/api/files/download/abc6bc47d2cdca1c",
+    "previewUrl": "/api/files/download/abc6bc47d2cdca1c?inline=1",
+    "title": "لبدياف",
+    "verified": true,
+    "diskPath": "/app/applet/data/generated_files/abc6bc47d2cdca1c_لبدياف.pdf"
+  },
+  "6de8705a63fbad2e": {
+    "id": "6de8705a63fbad2e",
+    "filename": "تقرير_إداري_تيدكلت.docx",
+    "format": "docx",
+    "mimeType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "sizeBytes": 1330,
+    "createdAt": "2026-10-23T16:31:17.049Z",
+    "downloadUrl": "/api/files/download/6de8705a63fbad2e",
+    "title": "تقرير_إداري_تيدكلت",
+    "verified": true,
+    "diskPath": "/app/applet/data/generated_files/6de8705a63fbad2e_تقرير_إداري_تيدكلت.docx"
+  },
+  "8be1abde8d175ac7": {
+    "id": "8be1abde8d175ac7",
+    "filename": "ميزانية_المشروع.xlsx",
+    "format": "xlsx",
+    "mimeType": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "sizeBytes": 1910,
+    "createdAt": "2026-10-23T16:31:17.054Z",
+    "downloadUrl": "/api/files/download/8be1abde8d175ac7",
+    "title": "ميزانية_المشروع",
+    "verified": true,
+    "diskPath": "/app/applet/data/generated_files/8be1abde8d175ac7_ميزانية_المشروع.xlsx"
+  }
+}

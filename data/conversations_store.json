@@ -1,0 +1,405 @@
+{
+  "test_conv_1792773076984": {
+    "conversation_id": "test_conv_1792773076984",
+    "user_id": "tester",
+    "title": "ما هي أهم معالم مدينة عين صالح؟",
+    "created_at": "2026-10-23T16:31:16.985Z",
+    "updated_at": "2026-10-23T16:31:16.986Z",
+    "summary": "",
+    "messages": [
+      {
+        "role": "user",
+        "content": "ما هي أهم معالم مدينة عين صالح؟",
+        "timestamp": 1792773076985
+      },
+      {
+        "role": "assistant",
+        "content": "1. قصر المرابطين التاريخي.\n2. الكثبان الرملية الذهبية.\n3. واحات النخيل والفقارات.",
+        "timestamp": 1792773076986
+      }
+    ],
+    "sources": [],
+    "generated_files": [],
+    "uploaded_files": []
+  },
+  "test_search_1792773077030": {
+    "conversation_id": "test_search_1792773077030",
+    "user_id": "tester",
+    "title": "محادثة جديدة",
+    "created_at": "2026-10-23T16:31:17.030Z",
+    "updated_at": "2026-10-23T16:31:17.030Z",
+    "summary": "",
+    "messages": [],
+    "sources": [
+      {
+        "index": 1,
+        "title": "الطاقة الشمسية في الصحراء الجزائرية",
+        "url": "https://example.org/solar-dz",
+        "snippet": "تعد الصحراء الجزائرية من أغنى مناطق العالم بالإشعاع الشمسي بمتوسط 3500 ساعة سنوياً.",
+        "extractedContent": "تعد الصحراء الجزائرية من أغنى مناطق العالم بالإشعاع الشمسي بمتوسط 3500 ساعة سنوياً ومشاريع الطاقة المتجددة في عين صالح وأدرار.",
+        "publishedDate": "2026-03-15"
+      },
+      {
+        "index": 2,
+        "title": "الفقارات والمياه الجوفية في تيديكلت",
+        "url": "https://example.org/foggara-tidikelt",
+        "snippet": "نظام الفقارة المائي التقليدي يوزع المياه الجوفية بعدالة في واحات تيديكلت.",
+        "extractedContent": "نظام الفقارة المائي التقليدي يوزع المياه الجوفية بعدالة في واحات تيديكلت منذ قرون.",
+        "publishedDate": "2026-02-10"
+      },
+      {
+        "index": 3,
+        "title": "مشاريع الهيدروجين الأخضر في الجزائر",
+        "url": "https://example.org/green-hydrogen-dz",
+        "snippet": "تستهدف الجزائر تصدير الهيدروجين الأخضر إلى أوروبا عبر استغلال الطاقة الشمسية.",
+        "extractedContent": "تستهدف الجزائر تصدير الهيدروجين الأخضر إلى أوروبا عبر استغلال الطاقة الشمسية والرياح.",
+        "publishedDate": "2026-04-01"
+      }
+    ],
+    "generated_files": [],
+    "uploaded_files": []
+  },
+  "test_pdf_1792773077039": {
+    "conversation_id": "test_pdf_1792773077039",
+    "user_id": "default_user",
+    "title": "ما هي فوائد التمور في عين صالح؟",
+    "created_at": "2026-10-23T16:31:17.039Z",
+    "updated_at": "2026-10-23T16:31:17.046Z",
+    "summary": "",
+    "messages": [
+      {
+        "role": "user",
+        "content": "ما هي فوائد التمور في عين صالح؟",
+        "timestamp": 1792773077042
+      },
+      {
+        "role": "assistant",
+        "content": "التمور غنية بالسكريات الطبيعية والألياف والمعادن.",
+        "timestamp": 1792773077043
+      },
+      {
+        "role": "user",
+        "content": "حولها لبدياف",
+        "timestamp": 1792773077043
+      },
+      {
+        "role": "assistant",
+        "content": "تقرير فوائد التمور في منطقة تيديكلت وعين صالح.",
+        "timestamp": 1792773077044
+      }
+    ],
+    "sources": [],
+    "generated_files": [
+      {
+        "id": "abc6bc47d2cdca1c",
+        "filename": "لبدياف.pdf",
+        "format": "pdf",
+        "mimeType": "application/pdf",
+        "sizeBytes": 1096,
+        "createdAt": "2026-10-23T16:31:17.046Z",
+        "downloadUrl": "/api/files/download/abc6bc47d2cdca1c",
+        "previewUrl": "/api/files/download/abc6bc47d2cdca1c?inline=1",
+        "title": "لبدياف",
+        "verified": true
+      }
+    ],
+    "uploaded_files": []
+  },
+  "conv_bb4cf4e3f339": {
+    "conversation_id": "conv_bb4cf4e3f339",
+    "user_id": "default_user",
+    "title": "اشرح باختصار ما هي الخوارزمية في البرمجة؟",
+    "created_at": "2026-10-23T18:45:38.112Z",
+    "updated_at": "2026-10-23T18:45:41.744Z",
+    "summary": "",
+    "messages": [
+      {
+        "role": "user",
+        "content": "اشرح باختصار ما هي الخوارزمية في البرمجة؟",
+        "timestamp": 1792781141744
+      },
+      {
+        "role": "assistant",
+        "content": "الخوارزمية هي مجموعة من الخطوات المتسلسلة والمنطقية التي يتبعها الحاسوب لحل مشكلة معينة أو تنفيذ مهمة محددة.\n\n**مكوناتها الأساسية:**\n1. **المدخلات:** البيانات التي يبدأ بها البرنامج.\n2. **المعالجة:** الخطوات والعمليات التي تُجرى على البيانات.\n3. **المخرجات:** النتيجة النهائية أو الحل.\n\nتشبه \"وصفة الطعام\"؛ إذا اتبعت خطواتها بدقة، ستصل إلى النتيجة المطلوبة في كل مرة.",
+        "timestamp": 1792781141744
+      }
+    ],
+    "sources": [],
+    "generated_files": [],
+    "uploaded_files": []
+  },
+  "conv_68591526ea94": {
+    "conversation_id": "conv_68591526ea94",
+    "user_id": "default_user",
+    "title": "ما هي أهم معالم واحات عين صالح ومنطقة تيديكلت وأرقام الطوارئ",
+    "created_at": "2026-10-23T18:45:41.767Z",
+    "updated_at": "2026-10-23T18:45:46.243Z",
+    "summary": "",
+    "messages": [
+      {
+        "role": "user",
+        "content": "ما هي أهم معالم واحات عين صالح ومنطقة تيديكلت وأرقام الطوارئ المحلية؟",
+        "timestamp": 1792781146242
+      },
+      {
+        "role": "assistant",
+        "content": "أهم معالم عين صالح ومنطقة تيديكلت:\n\n1. **نظام الفقارات:** وهو نظام ري تقليدي فريد يعكس عبقرية الإنسان في إدارة المياه.\n2. **القصور القديمة:** مثل قصر العرب وقصر المرابطين، وهي شواهد تاريخية على العمارة الصحراوية.\n3. **زحف الرمال:** تشتهر المنطقة بظاهرة الكثبان الرملية المتحركة التي تحيط بالمدينة.\n4. **الغابة المتحجرة:** تقع في منطقة \"قارة كروش\" وتضم أشجاراً متحجرة تعود لملايين السنين.\n5. **واحات النخيل:** التي تشكل حزاماً أخضراً وسط الصحراء وتنتج أجود أنواع التمور.\n\nأرقام الطوارئ المحلية (الجزائر):\n\n*   **الحماية المدنية:** 14 أو 1021.\n*   **الشرطة:** 17 أو 1548.\n*   **الدرك الوطني:** 1055.\n*   **الإسعاف الطبي:** 16.\n\nهل تحتاج إلى معلومات إضافية عن موقع محدد منها؟",
+        "timestamp": 1792781146243
+      }
+    ],
+    "sources": [],
+    "generated_files": [],
+    "uploaded_files": []
+  },
+  "conv_032455886caa": {
+    "conversation_id": "conv_032455886caa",
+    "user_id": "default_user",
+    "title": "ما هي حالة الطقس ودرجة الحرارة الآن في عين صالح اليوم؟",
+    "created_at": "2026-10-23T18:45:46.254Z",
+    "updated_at": "2026-10-23T18:46:01.693Z",
+    "summary": "",
+    "messages": [
+      {
+        "role": "user",
+        "content": "ما هي حالة الطقس ودرجة الحرارة الآن في عين صالح اليوم؟",
+        "timestamp": 1792781161130
+      },
+      {
+        "role": "assistant",
+        "content": "حالة الطقس في عين صالح الآن (الجمعة 23 أكتوبر 2026) مستقرة وصافية، وإليك التفاصيل:\n\n1. **درجة الحرارة الحالية:** 27.9° درجة مئوية.\n2. **الحالة العامة:** طقس مشمس وصافٍ.\n3. **الدرجات القصوى والدنيا:** العظمى سجلت 33.1° مئوية، والصغرى المتوقعة 20.9° مئوية.\n4. **الرياح:** هادئة بسرعة 9.5 كم/سا.\n5. **الرطوبة:** منخفضة عند 24%.\n\nالطرق الوطنية المؤدية من وإلى عين صالح مفتوحة وسالكة بشكل طبيعي. هل ترغب في معرفة توقعات الساعات القادمة؟",
+        "timestamp": 1792781161131
+      }
+    ],
+    "sources": [
+      {
+        "index": 1,
+        "title": "الأرصاد الجوية الحية (Open-Meteo) — طقس عين صالح (تيديكلت) المباشر",
+        "url": "https://open-meteo.com/en/docs#latitude=27.1935&longitude=2.4822",
+        "snippet": "🌦️ Docs | Open-Meteo.com Weather Forecast API Seamless integration of high-resolution weather models with up 16 days forecast Location and Time Location: Coordinates List Bounding box Latitude Longitude Not set (GMT+0) Timezone Search Time: Forecast Length Time Interval 7 days (default) Forecast days 0 days (default) ",
+        "extractedContent": "🌦️ Docs | Open-Meteo.com Weather Forecast API Seamless integration of high-resolution weather models with up 16 days forecast Location and Time Location: Coordinates List Bounding box Latitude Longitude Not set (GMT+0) Timezone Search Time: Forecast Length Time Interval 7 days (default) Forecast days 0 days (default) Past days By default, we provide forecasts for 7 days, but you can access forecasts for up to 16 days. If you're interested in past weather data, you can use the Past Days feature to access archived forecasts. Hourly Weather Variables svg]:size-3.5 grid place-content-center text-current transition-none\"> Temperature (2 m) svg]:size-3.5 grid place-content-center text-current transition-none\"> Relative Humidity (2 m) svg]:size-3.5 grid place-content-center text-current transition-none\"> Dewpoint (2 m) svg]:size-3.5 grid place-content-center text-current transition-none\"> Apparent Temperature svg]:size-3.5 grid place-content-center text-current transition-none\"> Precipitation Probability svg]:size-3.5 grid place-content-center text-current transition-none\"> Precipitation (rain + showers + snow) svg]:size-3.5 grid place-content-center text-current transition-none\"> Rain svg]:size-3.5 grid place-content-center text-current transition-none\"> Showers svg]:size-3.5 grid place-content-center text-current transition-none\"> Snowfall svg]:size-3.5 grid place-content-center text-current transition-none\"> Snow Depth svg]:size-3.5 grid place-content-center text-current transition-none\"> Weather code svg]:size-3.5 grid place-content-center text-current transition-none\"> Sea Level Pressure svg]:size-3.5 grid place-content-center text-current transition-none\"> Surface Pressure svg]:size-3.5 grid place-content-center text-current transition-none\"> Cloud Cover Total svg]:size",
+        "domain": "open-meteo.com",
+        "reliability": "medium"
+      },
+      {
+        "index": 2,
+        "title": "الأحوال الجوية بالجزائر هذا الاثنين 19 أكتوبر 2026 - الجزائر الآن",
+        "url": "https://news.google.com/rss/articles/CBMi2gJBVV95cUxQN3VWR09kN3JtMTlHVUJONllfM0ZGbkpseHJGbkRRSk1IVHljZzF6X2JnMkZaSndsc1kyV2E5WF82a2hNb0pXczJCTE9oS1Z1cHA1N0hOUk5PS04tc19CSDA5RkNhNlJLWXpDRTdjbDQzcEJPU3RNcG9qYl9jNjBGVnZiTHU1UFRlenV2SmV2Uk1nOWhMRFA1VExnVFBpU1hwUGlReXJtNEVHR3ZPVzlIOGt5Vi16VVZQSXdFZWtEcm5BcGxjY29xWHVDb1pGSk5CX2hZTURhZzl2c0FSTVg3NGQ3LWhMYkgwQmdOdUsyaTVkRktRVDhFZ1RYVkpvVl9PdTBPTkFaaTdoTDdWZ2JTUzU5TS14R2VIQnhJOF9Gc2tkdkl0NlRTTkJHa0lyS1hBZWJzbmpWaUdIT1ZDY1RncFQzNDAwZUIzeVJLQ1VpX1NabXJJeUpFM0lR?oc=5",
+        "snippet": "",
+        "extractedContent": "الأحوال الجوية بالجزائر هذا الاثنين 19 أكتوبر 2026 - الجزائر الآن",
+        "domain": "news.google.com",
+        "reliability": "medium"
+      },
+      {
+        "index": 3,
+        "title": "الجزائر.. أمطار رعدية ورياح تصل إلى 50 كلم/سا بهذه المناطق - الترا جزائر | Ultra Algeria",
+        "url": "https://news.google.com/rss/articles/CBMivgRBVV95cUxOdFY0VGJjWEVmT0ZsNWFkekxRQzRXdnBvOE5mUXBydDdZc1piWUV4c3IyX09UbWVXMnpETWNYcVJQTjdHLWVkeDB5cXpnMk1HTU83MlRFZGRuYXBxa2N4a3hxd1lNR2J5RjJ1dVNERkpyMUtVNmw4a0lFWVowZi0wQjVLalJUeTJBcU16VVZLRWFzc3pnMURuQVVpdkV4aFBfNzh6elRRTTlMTXpyYW1zNUV5VlFILV83dHZwUUFYTGs0N05EUU5feUliTjg2R0FvaUN0RktCZWlEYzM5NHVjQTRwbDRXVW5KZnQ3VUhJbXN1ZG5Sd0pBNTI4TzZmcVJLSE5MeHFBeGI2NWtfakYyYXpQTHdqM2ZoRVZKQnZjMUVra3dDVmtjenozNVoxLWtwN1A5Xy1RV3RxejJWby1KSm9kTXlpcWVleVNmemVWcFlsY3ZSUWJZa1FNY21vTnU2UkhSV082anlCalM2U3RrSGYtWXMtS2lMbVQwTGR3OEl5S0pwSW80TlRkanQ4WDlaLUxPSVlROGV3RHZKZTNCV0xjTW0ybkpLd28tUk5ldFNhcHRsczFrd0pyMmlSSlIwclNIeEdGTm1tVFN5WkFRU3Z3dHR1NUxadnJwa3hvOVBTMWItWUNDN3B4U0JPR3JieHNocGlOU2dYWXVmcGJ5N3ljUDhfYTJrSnhPNUxOZUU2eW5NR01xcXBqd3FVVjZQSlNiWG9nczVYQk5fYUJNSm8tLXVRd2NFc1l2Nzhn?oc=5",
+        "snippet": "",
+        "extractedContent": "الجزائر.. أمطار رعدية ورياح تصل إلى 50 كلم/سا بهذه المناطق - الترا جزائر | Ultra Algeria",
+        "domain": "news.google.com",
+        "reliability": "medium"
+      },
+      {
+        "index": 4,
+        "title": "موجة حر تصل إلى 49 درجة وأمطار رعدية في هذه الولايات - أخبار دزاير",
+        "url": "https://news.google.com/rss/articles/CBMiyAJBVV95cUxQX3dOSXNhaG8zUXFoeUEzZ3VtNEVMZTdpaTVCMXNuNXpIVHE2TnAzdUp5RXVjNUViNTBIV3Y1Y3JuU00yeG9lTU5tNnY3Vmlib1pWOUx3SlMxZHd3Wl9jUG9oeXYxcVJuSVU3VE9oeS1KUlFieVMxZncweUJ2WU54eG9Dc1ZuWUY2eFhWZkJFWjlrbnU4R1dwbElfc0V2dndxaFRzZWM0RUlCamRQRmFnVUdXNURNaGg5U1BjckNiWFBfU2VZcERuMnd5MllhaUJkdlRaQ09JUVRtUWNOZE1hWFN0X2lKSnR1NS1vaEQ2SHkyUF9xamctUm5lSGgyblZ6dmhjM09id2tSMnY3cV8yVmh2eXFYSUlLVHpzNzd2YWEwODdGR0l5dDRKdHdCYlhNVFJtN09FeHJsdWphLXNuamRNQUMxNEVC?oc=5",
+        "snippet": "",
+        "extractedContent": "موجة حر تصل إلى 49 درجة وأمطار رعدية في هذه الولايات - أخبار دزاير",
+        "domain": "news.google.com",
+        "reliability": "medium"
+      },
+      {
+        "index": 5,
+        "title": "موجة حر وزوابع رملية على هذه الولايات - مجتمع : الخبر - الخبر",
+        "url": "https://news.google.com/rss/articles/CBMi0gJBVV95cUxQZWtOeEVxVTYyVVJlNk9LZWhjTURUSG5zcUxPVDBWcXBrOUdOcW45LWtlSDVfbGFDNHRxazhxbkF1dzI5bVhvdTF5VFgxYzZHQVVvODJ3RmllMzJQMmdxUEozQmpLYzBDRFNfYThpdDc2MU4xNXpZaVNMU25yalh0eHpod2RNMGRXTHl2X3NPbG9ialppdDRReENNaF9ydTVWV1R3Q1UzVGxQbEhMVVRVazJBTTQ1dUtmMGNnMWhDcUJPMFpYa3dpQjNKaE1ZZmJ1WlBUMDhaOUFVNVl0SVZVUTF3WFRrNjQ0aWItd09EZFozbHNydHNoMEZiY1IxWXpIaHNjeDdXamVwLXRvb0RmaEw1WGR6XzlPcndaQlBHTEY2S2djOUZiU25WX3FfeUFINkpKQzZ5b0k4MXJqS1lZUEhiajV2THc4OVpLVEVwNS05QQ?oc=5",
+        "snippet": "",
+        "extractedContent": "موجة حر وزوابع رملية على هذه الولايات - مجتمع : الخبر - الخبر",
+        "domain": "news.google.com",
+        "reliability": "medium"
+      },
+      {
+        "index": 6,
+        "title": "ويكيبيديا: تبعات الاحتباس الحراري",
+        "url": "https://ar.wikipedia.org/wiki/%D8%AA%D8%A8%D8%B9%D8%A7%D8%AA_%D8%A7%D9%84%D8%A7%D8%AD%D8%AA%D8%A8%D8%A7%D8%B3_%D8%A7%D9%84%D8%AD%D8%B1%D8%A7%D8%B1%D9%8A",
+        "snippet": "تبعات الاحتباس الحراري - ويكيبيديا انتقل إلى المحتوى من ويكيبيديا، الموسوعة الحرة موجز آثار تغير المناخ. الاحترار العالمي المتوقع في عام 2100 لمجموعة من سيناريوهات الانبعاثات. آثار الاحتباس الحراري هي التغيرات البيئية والاجتماعية الناجمة بشكل مباشر أو غير مباشر عن الانبعاثات البشرية نتيجة إصدار غازات دفيئة بشرية المنشأ",
+        "extractedContent": "تبعات الاحتباس الحراري - ويكيبيديا انتقل إلى المحتوى من ويكيبيديا، الموسوعة الحرة موجز آثار تغير المناخ. الاحترار العالمي المتوقع في عام 2100 لمجموعة من سيناريوهات الانبعاثات. آثار الاحتباس الحراري هي التغيرات البيئية والاجتماعية الناجمة بشكل مباشر أو غير مباشر عن الانبعاثات البشرية نتيجة إصدار غازات دفيئة بشرية المنشأ . هناك إجماع علمي على أن تغير المناخ يحدث وأن الأنشطة البشرية هي المحرك الأساسي. [ 1 ] وقد لوحظت بالفعل آثار كثيرة لتغير المناخ، بما في ذلك تراجع الأنهار الجليدية [ 2 ] والتغيرات في توقيت الأحداث الموسمية [ 2 ] (مثلا: ازدهار النباتات سابقا)، [ 3 ] والتغيرات في الإنتاجية الزراعية. [ 2 ] وستختلف الآثار المستقبلية لتغير المناخ تبعا لسياسات تغير المناخ [ 4 ] والتنمية الاجتماعية . [ 5 ] وتهدف السياسات الرئيسية لمعالجة تغير المناخ إلى الحد من انبعاثات الغازات الدفيئة البشرية (التخفيف من آثار تغير المناخ) والتكيف مع آثار تغير المناخ. [ 6 ] الهندسة الجيولوجية هي خيار آخر للسياسة. [ 6 ] ويمكن لسياسات تغير المناخ على المدى القريب أن تؤثر تأثيرا كبيرا على آثار تغير المناخ على المدى الطويل. [ 4 ] [ 7 ] وقد تكون سياسات التخفيف الصارمة قادرة على الحد من الاحترار العالمي (في عام 2100) إلى حوالي 2 درجة مئوية أو أقل مقارنة بمستويات ما قبل الصناعة . [ 8 ] وبدون التخفيف، قد يؤدي الطلب المتزايد على الطاقة والاستخدام الواسع للوقود الأحفوري [ 9 ] إلى ارتفاع درجة حرارة الأرض بنحو 4 درجات مئوية. [ 10 ] [ 11 ] كما أن ارتفاع درجة حرارة الاحترار العالمي سيكون أكثر صعوبة للتكيف مع [ 12 ] ومن شأنه أن يزيد من مخاطر الآثار السلبية. [ 13 ] تعريفات [ عدل | عدل المصدر ] في هذه المقالة « تغير المناخ » يعني تغير المناخ الذي يستمر على مدى فترة طويلة من الزمن. [ 14 ] [ 15 ] وتعرف المنظمة العالمية للأرصاد الجوية هذه الفترة الزمنية ب 30 عاما. [ 14 ] ومن أمثلة تغير المناخ زيادات في درجة الحرارة السطحية العالمية ( الاحترار العالمي ) والتغيرات في أنماط هطول الأمطار والتغيرات في تواتر الظواهر الجوي",
+        "publishedDate": "2014-12-28",
+        "domain": "ar.wikipedia.org",
+        "reliability": "high"
+      }
+    ],
+    "generated_files": [],
+    "uploaded_files": []
+  },
+  "conv_5f1af126dee3": {
+    "conversation_id": "conv_5f1af126dee3",
+    "user_id": "default_user",
+    "title": "ابحث عن آخر أخبار ومستجدات الجزائر اليوم",
+    "created_at": "2026-10-23T18:46:01.704Z",
+    "updated_at": "2026-10-23T18:46:09.669Z",
+    "summary": "",
+    "messages": [
+      {
+        "role": "user",
+        "content": "ابحث عن آخر أخبار ومستجدات الجزائر اليوم",
+        "timestamp": 1792781168231
+      },
+      {
+        "role": "assistant",
+        "content": "اليوم الجمعة 23 أكتوبر 2026، هادو أهم المستجدات في الجزائر حسب آخر التقارير:\n\n1. **دبلوماسية:** محادثات جزائرية-سعودية مستمرة لمتابعة تطورات الأوضاع في منطقة الشرق الأوسط.\n2. **الأمن الإفريقي:** الجزائر راهي تترأس مجلس السلم والأمن الإفريقي، ومركزة بزاف على الملفات الأمنية والإنسانية في منطقة الساحل.\n3. **التعليم العالي:** صدور مستجدات تهم طلبة الدكتوراه وتفاصيل جديدة بخصوص توجيه وتسجيل الطلبة الجدد في الجامعات.\n4. **نشاط إقليمي:** متابعة دقيقة للوضع السياسي والأمني في المنطقة لتعزيز الاستقرار.\n\nتحب نزيد نحوسلك على تفاصيل في كاش مجال محدد؟",
+        "timestamp": 1792781168232
+      }
+    ],
+    "sources": [
+      {
+        "index": 1,
+        "title": "محادثات جزائرية – سعودية بشأن مستجدات الأوضاع في الشرق الأوسط - AL24 News",
+        "url": "https://news.google.com/rss/articles/CBMitgJBVV95cUxPSDI5TFVpVl9pSDhCa2hNTUZyZHNxUmNjbmtLdnRpNkY1QWZnVXJ5WEF1anpCcURzQjRFdnV1dkY0WFF6QlhTTUc0RHZsX2xOMzctaUhuTk1MTTg1WExQcEtxUzA0SVFkU1luLUp0RXpieHFlUk9SSVlsRnZvQngtQWZ3TGVaTV9wbUFHR3dTazI4dkVQRVJvYjJ6bllxYms2LWFzdDJRSkxlaElkbXktQ3BXWTZvX3M1dE9vNElZcTJIZXVQaHh4WDRmSk0wQVdSazJIZzRXUG9uOGNyQ2VLdy1udktZbTlxWWRzQlNIOTRpYUg5TGxWTmRkR3hUVVk2WGM1Y2FHcWJXNkVEMzdHbUxLOEdvT29FLWlmV09wZlhxNndCVUZScHZfMUVKZnNOZ1pFYjF3?oc=5",
+        "snippet": "",
+        "extractedContent": "محادثات جزائرية – سعودية بشأن مستجدات الأوضاع في الشرق الأوسط - AL24 News",
+        "domain": "news.google.com",
+        "reliability": "medium"
+      },
+      {
+        "index": 2,
+        "title": "برئاسة الجزائر، مجلس السلم والأمن الإفريقي يبحث مستجدات الأوضاع السياسية والأمنية والإنسانية في منطقة الساحل - الإذاعة الجزائرية |",
+        "url": "https://news.google.com/rss/articles/CBMiU0FVX3lxTE1OUFgtMVZCY3hUQnBINGNoay04eVdINDVPeFBUWHE4aWxsMFlyeFNrOTdidXBNcVNFeGtpYldSU0g3VnJ2X0ptWGxqc2JDNS1uVGtN?oc=5",
+        "snippet": "",
+        "extractedContent": "برئاسة الجزائر، مجلس السلم والأمن الإفريقي يبحث مستجدات الأوضاع السياسية والأمنية والإنسانية في منطقة الساحل - الإذاعة الجزائرية |",
+        "domain": "news.google.com",
+        "reliability": "medium"
+      },
+      {
+        "index": 3,
+        "title": "مستجدات هامة حول \"الدكتوراه \" - خبر برس",
+        "url": "https://news.google.com/rss/articles/CBMiUkFVX3lxTE9zZ2VpQ1h4WlhYTE9vbkJ4T2d2WHNKRDgtWVBFNFZmTDg3Nkl4RFpmQVhQZ3Z4ZVp0dW9jNThFNk5xS0pUYlN0Q290cHIzM1h4WEE?oc=5",
+        "snippet": "",
+        "extractedContent": "مستجدات هامة حول \"الدكتوراه \" - خبر برس",
+        "domain": "news.google.com",
+        "reliability": "medium"
+      },
+      {
+        "index": 4,
+        "title": "بداري يفصّل في توجيه وتسجيل الطلبة الجدد بالجامعات اليوم - الشعب أونلاين",
+        "url": "https://news.google.com/rss/articles/CBMi0gJBVV95cUxPTUhhZkpnVGllb0VITmJBS2ZmMlI2Zmd3aG0yaXNsTFBLQ1BTcS1xaGVISm5xM2pxd2U0QkE5cHp4dTAyS3BYcFdwRDdGOHRLcElrZkU3RjBEUFphRkxRRlBILWZLeURMeXN4NndyZUZRVThBZjBSbWk0OVVCUDluTWM1NS01VzdhaWpyaGVKTDNZNUkwLXF4SHAtZlJzMXNtNHBBbW5XRW5yMWQyMmlSeFk1MzNMLVUzcEM5a2xodXhFcDRXX1dCNDB6TVRHRTNKc0x2X1ZheDhxQU82UE4tMWhnNVlKNllkaGFEaHN3aVpNdG5iU2dYYXNYemZxZ1Q2M3FlMnB0b05aUkd5VjRJeHV4X0pLSzlXb1BsWXhWOGd3SThNc3k1OHlLQXlPeU5IdGI3OUlLWjEwOHk0eVRrUDZnTzZadjBPWEFjdVV6ZDZ0UQ?oc=5",
+        "snippet": "",
+        "extractedContent": "بداري يفصّل في توجيه وتسجيل الطلبة الجدد بالجامعات اليوم - الشعب أونلاين",
+        "domain": "news.google.com",
+        "reliability": "medium"
+      },
+      {
+        "index": 5,
+        "title": "ويكيبيديا: عاصي الرحباني",
+        "url": "https://ar.wikipedia.org/wiki/%D8%B9%D8%A7%D8%B5%D9%8A_%D8%A7%D9%84%D8%B1%D8%AD%D8%A8%D8%A7%D9%86%D9%8A",
+        "snippet": "عاصي الرحباني - ويكيبيديا انتقل إلى المحتوى من ويكيبيديا، الموسوعة الحرة هذه سبتمبر 2020 مكتوبة بأسلوب أدبي ، وهي بحاجة لتهذيب لتصبح موسوعية الأسلوب . فضلًا، ساهم في تهذيبها من خلال استبدال عبارات موضوعية بتعابير الإنشاء الأدبية. عاصي الرحباني معلومات شخصية اسم الولادة عاصي حنا الياس الرحباني الميلاد 4 مايو 1923 أنطليا",
+        "extractedContent": "عاصي الرحباني - ويكيبيديا انتقل إلى المحتوى من ويكيبيديا، الموسوعة الحرة هذه سبتمبر 2020 مكتوبة بأسلوب أدبي ، وهي بحاجة لتهذيب لتصبح موسوعية الأسلوب . فضلًا، ساهم في تهذيبها من خلال استبدال عبارات موضوعية بتعابير الإنشاء الأدبية. عاصي الرحباني معلومات شخصية اسم الولادة عاصي حنا الياس الرحباني الميلاد 4 مايو 1923 أنطلياس ، لبنان الوفاة 21 يونيو 1986 (63 سنة) لبنان الجنسية لبنان الديانة المسيحية عضوية الأخوين رحباني الزوجة فيروز الأولاد زياد الرحباني ريما عاصي الرحباني إخوة وأخوات منصور الرحباني ، وإلياس الرحباني الحياة الفنية اللقب عاصي الرحباني النوع مؤلف موسيقي ومسرحي وملحّن وشاعر الآلات الموسيقية بيانو ، وبزق المهنة كاتب أغاني ، وكاتب مسرحي ، وموسيقي اللغات العربية سنوات النشاط 1951 - 1986 المواقع IMDB صفحة متعلقة في موقع IMDB تعديل مصدري - تعديل عَاصِي الرَّحبانِيّ ( 4 مايو 1923 - 21 يونيو 1986 ) [ 1 ] ، عمِيد ومُؤسّس، مع أَخِيه منصُور الرَّحبانِيّ ، عُرفا باسم ( الأَخوين رحبانِيّ )، وهُو مُؤلف مُوسيقيّ ومسرحِيّ وشاعر، وهو زوج الفنّانة نهاد حداد المشهورة بفيرُوز . النّشأة والبِدايات [ عدل | عدل المصدر ] حفل زفاف عاصي الرحباني وفيروز وُلدَ عاصِي في 4 أيّار ( مايُو ) لِلعام 1923 فِي قَرية أَنطلياس (10 كلم شمالاً مِن بيرُوت ،لُبنان )، لأبوين هُما: حنّا إلياس الرّحبانِيّ وسعدى صَعب. وكان لِلبيئة الَّتِي نشأَ فِيها دورٌ أساسيٌّ فِي التَّأثِير على نوعِيَّة عطَائِه الفنِّيّ مِن حيث الأفكار والمواضِيع والسِّياقات، حيث كان عاصِي يكبُرُ فِي طُفُولته بيّن البساتِين والمُزارِعِين وما يُمثِّلُونه مِن تناغمٍ إِنسانِيٌّ مع الطَّبِيعة وقِيم العيشِ بِبساطةٍ ورِضى، وبيِّن المدرَسة والكنِيسة وما فِيهُما آنذاك مِن تركِيزٍ لِلقِيم الرُّوحيَّة والثَّقافِيَّة النَّبِيلة. وأَمضَى عاصِي قِسطاً هاماً مِن طُفُولتِه فِي مَقهى الفوارِ ثُمَّ المنيِبيِع فِي ( الجَبل ) الَّذِي كان يملِكه والِدُه، سمع فِيه قصص وأَخبار المراجِل والقبضايَاتِ الَّتِي كَانت تدور فِي أَروقته، وحَفِظ عاصِي عن جِدَّته غيتّ",
+        "publishedDate": "2006-10-25",
+        "domain": "ar.wikipedia.org",
+        "reliability": "high"
+      },
+      {
+        "index": 6,
+        "title": "ويكيبيديا: قائمة الأفلام المرشحة لجوائز الأوسكار",
+        "url": "https://ar.wikipedia.org/wiki/%D9%82%D8%A7%D8%A6%D9%85%D8%A9_%D8%A7%D9%84%D8%A3%D9%81%D9%84%D8%A7%D9%85_%D8%A7%D9%84%D9%85%D8%B1%D8%B4%D8%AD%D8%A9_%D9%84%D8%AC%D9%88%D8%A7%D8%A6%D8%B2_%D8%A7%D9%84%D8%A3%D9%88%D8%B3%D9%83%D8%A7%D8%B1",
+        "snippet": "قائمة الأفلام المرشحة لجوائز الأوسكار - ويكيبيديا انتقل إلى المحتوى من ويكيبيديا، الموسوعة الحرة هذه المقالة يتيمة إذ تصل إليها مقالات أخرى قليلة جدًا. فضلًا، ساعد بإضافة وصلة إليها في مقالات متعلقة بها . ( ديسمبر 2025 ) هذه قائمة بالأفلام المرشحة لجوائز الأوسكار . الإحصائيات [ عدل | عدل المصدر ] \"حتى 5 مارس 2025:\" إجم",
+        "extractedContent": "قائمة الأفلام المرشحة لجوائز الأوسكار - ويكيبيديا انتقل إلى المحتوى من ويكيبيديا، الموسوعة الحرة هذه المقالة يتيمة إذ تصل إليها مقالات أخرى قليلة جدًا. فضلًا، ساعد بإضافة وصلة إليها في مقالات متعلقة بها . ( ديسمبر 2025 ) هذه قائمة بالأفلام المرشحة لجوائز الأوسكار . الإحصائيات [ عدل | عدل المصدر ] \"حتى 5 مارس 2025:\" إجمالي عدد حفلات توزيع الجوائز: 97 إجمالي عدد الأفلام المرشحة: 5182 إجمالي عدد الترشيحات المقدمة للأفلام: 10651 إجمالي عدد جوائز الأوسكار الممنوحة: 2239 (57 جائزة فخرية و2182 جائزة تنافسية) الأفلام [ عدل | عدل المصدر ] إذا فاز فيلم بجائزة الأوسكار لأفضل فيلم ، فسيتم إدراج مدخل خاص بخلفية ملونة وعنوان بخط عريض . يتم فصل جوائز الأكاديمية التنافسية عن الجوائز غير التنافسية؛ وعلى هذا النحو، فإن أي أفلام حصلت على جائزة غير تنافسية ستظهر بين قوسين بجانب عدد الانتصارات التنافسية. الأفلام التي تم ترشيحها، ولكن تم سحب ترشيحها لأي سبب من الأسباب مدرجة هنا، ولكن دون احتساب الترشيح. يشير إلى الفوز بجائزة أفضل فيلم . قائمة الأفلام [ 1 ] الفيلم سنة الإصدار الحفل الجوائز الترشيحات أجنحة 1927 الأول 2 2 السماء السابعة 1927 الأول 3 5 شروق الشمس: قصة بشريين 1927 الأول 3 4 المهمة الأخيرة 1928 الأول 1 2 ملاك الشارع 1928 الأول / الثاني 1 3 العاصفة 1928 الأول 1 1 اليمامة 1927 الأول 1 1 طريق اللحم 1927 الأول 1 1 فارسان عربيان 1927 الأول 1 1 العالم السفلي 1927 الأول 1 1 سيدي تومسون 1928 الأول 0 2 الحشد 1928 الأول 0 2 وصول السفينة 1928 الأول 0 1 تشانغ 1927 الأول 0 1 بيتسي المجيدة 1928 الأول 0 1 سوريل والابن 1927 الأول 0 1 سبيدي 1928 الأول 0 1 راقص الشيطان 1927 الأول 0 1 مغني الجاز 1927 الأول 0 (1) 1 اللهب السحري 1927 الأول 0 1 أنشوطة المشنقة 1928 الأول 0 1 الفتى ذو الجلد اللامع 1927 الأول 0 1 الحياة الخاصة لهيلين طروادة 1927 الأول 0 1 الجلبة 1928 الأول 0 1 السيرك 1928 الأول 0 (1) 0 لحن برودواي 1929 الثاني 1 3 في أريزونا القديمة 1928 الثاني 1 5 الوطني 1928 الثاني 1 5 السيدة المقدسة 192",
+        "publishedDate": "2025-12-27",
+        "domain": "ar.wikipedia.org",
+        "reliability": "high"
+      }
+    ],
+    "generated_files": [],
+    "uploaded_files": []
+  },
+  "conv_54d52237928a": {
+    "conversation_id": "conv_54d52237928a",
+    "user_id": "default_user",
+    "title": "اشرح نظرية النسبية",
+    "created_at": "2026-10-23T18:46:09.678Z",
+    "updated_at": "2026-10-23T18:46:09.691Z",
+    "summary": "",
+    "messages": [
+      {
+        "role": "user",
+        "content": "اشرح نظرية النسبية",
+        "timestamp": 1792781169690
+      },
+      {
+        "role": "assistant",
+        "content": "⚠️ انتهت الحصة المؤقتة لطلبات الذكاء الاصطناعي (خطأ تجاوز الحد 429). يرجى الانتظار قليلاً ثم إعادة المحاولة.",
+        "timestamp": 1792781169691
+      }
+    ],
+    "sources": [],
+    "generated_files": [],
+    "uploaded_files": []
+  },
+  "conv_b372fb58b3d1": {
+    "conversation_id": "conv_b372fb58b3d1",
+    "user_id": "default_user",
+    "title": "اشرح نظرية النسبية",
+    "created_at": "2026-10-23T18:46:09.698Z",
+    "updated_at": "2026-10-23T18:46:09.705Z",
+    "summary": "",
+    "messages": [
+      {
+        "role": "user",
+        "content": "اشرح نظرية النسبية",
+        "timestamp": 1792781169704
+      },
+      {
+        "role": "assistant",
+        "content": "⏱️ انتهت المهلة الزمنية للاتصال بمحركات الذكاء الاصطناعي نظراً لبطء الاستجابة حالياً. يرجى المحاولة مرة أخرى أو اختصار السؤال.",
+        "timestamp": 1792781169705
+      }
+    ],
+    "sources": [],
+    "generated_files": [],
+    "uploaded_files": []
+  },
+  "conv_c46fa7feef7b": {
+    "conversation_id": "conv_c46fa7feef7b",
+    "user_id": "default_user",
+    "title": "اشرح نظرية النسبية",
+    "created_at": "2026-10-23T18:46:09.710Z",
+    "updated_at": "2026-10-23T18:46:09.714Z",
+    "summary": "",
+    "messages": [
+      {
+        "role": "user",
+        "content": "اشرح نظرية النسبية",
+        "timestamp": 1792781169714
+      },
+      {
+        "role": "assistant",
+        "content": "🔌 خدمة الذكاء الاصطناعي غير متاحة مؤقتاً (تعذّر الاتصال بجميع المحركات الأساسية والاحتياطية). يرجى المحاولة مجدداً بعد قليل.",
+        "timestamp": 1792781169714
+      }
+    ],
+    "sources": [],
+    "generated_files": [],
+    "uploaded_files": []
+  },
+  "conv_6cac504b659f": {
+    "conversation_id": "conv_6cac504b659f",
+    "user_id": "default_user",
+    "title": "ما هي آخر أخبار الفضاء اليوم؟",
+    "created_at": "2026-10-23T18:46:09.719Z",
+    "updated_at": "2026-10-23T18:46:15.905Z",
+    "summary": "",
+    "messages": [
+      {
+        "role": "user",
+        "content": "ما هي آخر أخبار الفضاء اليوم؟",
+        "timestamp": 1792781175904
+      },
+      {
+        "role": "assistant",
+        "content": "اليوم هو الجمعة 23 أكتوبر 2026. نظراً لتعذر الوصول إلى نتائج البحث المباشرة حالياً، إليك أبرز التطورات والمهمات الفضائية التي تشغل العالم في هذه الفترة من عام 2026:\n\n1. **برنامج أرتميس (Artemis):** تكثيف الاستعدادات لمهمات الهبوط البشري القادمة على القطب الجنوبي للقمر.\n2. **مركبة ستارشيب (Starship):** استمرار الاختبارات المتقدمة لشركة سبيس إكس لتطوير نظام نقل فضائي كامل للاستخدام المتكرر نحو القمر والمريخ.\n3. **تلسكوب جيمس ويب:** مواصلة الكشف عن أسرار الثقوب السوداء والمجرات البعيدة في أعماق الكون.\n4. **محطة الفضاء الدولية:** استمرار العمليات العلمية مع زيادة الاعتماد على المحطات الفضائية التجارية الخاصة.\n\nأعتذر عن عدم تزويدك بأخبار وقعت في الساعات الأخيرة لعدم توفر الاتصال المباشر، وأنصحك بمتابعة الحسابات الرسمية لوكالة \"ناسا\" أو \"سبيس إكس\" لأي تحديثات طارئة اليوم.\n\nهل تود معرفة تفاصيل أكثر عن مهمة معينة؟",
+        "timestamp": 1792781175905
+      }
+    ],
+    "sources": [],
+    "generated_files": [],
+    "uploaded_files": []
+  }
+}
