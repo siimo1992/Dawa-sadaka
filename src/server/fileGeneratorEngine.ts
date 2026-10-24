@@ -236,22 +236,25 @@ function generateDocxBuffer(input: FileGenerationInput): Buffer {
   const lines = String(input.content || '').split(/\r?\n/);
   const bodyParts: string[] = [];
 
-  // Title paragraph
+  // Title paragraph with Cairo font and RTL
   bodyParts.push(`
     <w:p>
       <w:pPr>
         <w:jc w:val="right"/>
         <w:bidi/>
+        <w:spacing w:after="240" w:before="120" w:line="360" w:lineRule="auto"/>
       </w:pPr>
       <w:r>
         <w:rPr>
+          <w:rFonts w:ascii="Cairo" w:hAnsi="Cairo" w:cs="Cairo"/>
           <w:b/>
           <w:bCs/>
           <w:color w:val="92400E"/>
           <w:sz w:val="36"/>
           <w:szCs w:val="36"/>
+          <w:rtl/>
         </w:rPr>
-        <w:t>${escapeXml(input.title)}</w:t>
+        <w:t xml:space="preserve">${escapeXml(input.title)}</w:t>
       </w:r>
     </w:p>
   `);
@@ -259,32 +262,38 @@ function generateDocxBuffer(input: FileGenerationInput): Buffer {
   for (const rawLine of lines) {
     const line = rawLine.trim();
     if (!line) {
-      bodyParts.push('<w:p/>');
+      bodyParts.push('<w:p><w:pPr><w:bidi/><w:jc w:val="right"/></w:pPr></w:p>');
       continue;
     }
     const isH1 = line.startsWith('# ');
-    const isH2 = line.startsWith('## ') || line.startsWith('### ');
+    const isH2 = line.startsWith('## ');
+    const isH3 = line.startsWith('### ');
     const isBullet = /^[-*•]\s+/.test(line);
     const cleanText = line
       .replace(/^#{1,6}\s+/, '')
-      .replace(/^[-*•]\s+/, '• ')
+      .replace(/^[-*•]\s+/, isBullet ? '• ' : '')
       .replace(/\*\*(.*?)\*\*/g, '$1');
 
-    const fontSize = isH1 ? '32' : isH2 ? '28' : '24';
-    const isBold = isH1 || isH2;
+    const fontSize = isH1 ? '32' : isH2 ? '28' : isH3 ? '26' : '24';
+    const isBold = isH1 || isH2 || isH3;
+    const color = isH1 ? '92400E' : isH2 ? 'B45309' : '1F2937';
 
     bodyParts.push(`
       <w:p>
         <w:pPr>
           <w:jc w:val="right"/>
           <w:bidi/>
+          <w:spacing w:after="120" w:line="320" w:lineRule="auto"/>
           ${isBullet ? '<w:ind w:right="360"/>' : ''}
         </w:pPr>
         <w:r>
           <w:rPr>
+            <w:rFonts w:ascii="Cairo" w:hAnsi="Cairo" w:cs="Cairo"/>
             ${isBold ? '<w:b/><w:bCs/>' : ''}
+            <w:color w:val="${color}"/>
             <w:sz w:val="${fontSize}"/>
             <w:szCs w:val="${fontSize}"/>
+            <w:rtl/>
           </w:rPr>
           <w:t xml:space="preserve">${escapeXml(cleanText)}</w:t>
         </w:r>
@@ -299,8 +308,24 @@ function generateDocxBuffer(input: FileGenerationInput): Buffer {
       .map(
         (h) => `
         <w:tc>
-          <w:tcPr><w:shd w:val="clear" w:color="auto" w:fill="FEF3C7"/></w:tcPr>
-          <w:p><w:pPr><w:jc w:val="center"/><w:bidi/></w:pPr><w:r><w:rPr><w:b/><w:bCs/></w:rPr><w:t>${escapeXml(h)}</w:t></w:r></w:p>
+          <w:tcPr>
+            <w:shd w:val="clear" w:color="auto" w:fill="FEF3C7"/>
+            <w:tcMar><w:top w:w="120" w:type="dxa"/><w:bottom w:w="120" w:type="dxa"/><w:left w:w="120" w:type="dxa"/><w:right w:w="120" w:type="dxa"/></w:tcMar>
+          </w:tcPr>
+          <w:p>
+            <w:pPr><w:jc w:val="center"/><w:bidi/></w:pPr>
+            <w:r>
+              <w:rPr>
+                <w:rFonts w:ascii="Cairo" w:hAnsi="Cairo" w:cs="Cairo"/>
+                <w:b/><w:bCs/>
+                <w:color w:val="92400E"/>
+                <w:sz w:val="22"/>
+                <w:szCs w:val="22"/>
+                <w:rtl/>
+              </w:rPr>
+              <w:t xml:space="preserve">${escapeXml(h)}</w:t>
+            </w:r>
+          </w:p>
         </w:tc>`
       )
       .join('');
@@ -310,7 +335,23 @@ function generateDocxBuffer(input: FileGenerationInput): Buffer {
           `<w:tr>${row
             .map(
               (cell) =>
-                `<w:tc><w:p><w:pPr><w:jc w:val="right"/><w:bidi/></w:pPr><w:r><w:t>${escapeXml(String(cell ?? ''))}</w:t></w:r></w:p></w:tc>`
+                `<w:tc>
+                  <w:tcPr>
+                    <w:tcMar><w:top w:w="100" w:type="dxa"/><w:bottom w:w="100" w:type="dxa"/><w:left w:w="100" w:type="dxa"/><w:right w:w="100" w:type="dxa"/></w:tcMar>
+                  </w:tcPr>
+                  <w:p>
+                    <w:pPr><w:jc w:val="right"/><w:bidi/></w:pPr>
+                    <w:r>
+                      <w:rPr>
+                        <w:rFonts w:ascii="Cairo" w:hAnsi="Cairo" w:cs="Cairo"/>
+                        <w:sz w:val="22"/>
+                        <w:szCs w:val="22"/>
+                        <w:rtl/>
+                      </w:rPr>
+                      <w:t xml:space="preserve">${escapeXml(String(cell ?? ''))}</w:t>
+                    </w:r>
+                  </w:p>
+                </w:tc>`
             )
             .join('')}</w:tr>`
       )
@@ -320,14 +361,15 @@ function generateDocxBuffer(input: FileGenerationInput): Buffer {
       <w:tbl>
         <w:tblPr>
           <w:tblBorders>
-            <w:top w:val="single" w:sz="4" w:space="0" w:color="D97706"/>
-            <w:bottom w:val="single" w:sz="4" w:space="0" w:color="D97706"/>
-            <w:left w:val="single" w:sz="4" w:space="0" w:color="D97706"/>
-            <w:right w:val="single" w:sz="4" w:space="0" w:color="D97706"/>
+            <w:top w:val="single" w:sz="6" w:space="0" w:color="D97706"/>
+            <w:bottom w:val="single" w:sz="6" w:space="0" w:color="D97706"/>
+            <w:left w:val="single" w:sz="6" w:space="0" w:color="D97706"/>
+            <w:right w:val="single" w:sz="6" w:space="0" w:color="D97706"/>
             <w:insideH w:val="single" w:sz="4" w:space="0" w:color="E5E7EB"/>
             <w:insideV w:val="single" w:sz="4" w:space="0" w:color="E5E7EB"/>
           </w:tblBorders>
           <w:bidiVisual/>
+          <w:jc w:val="center"/>
         </w:tblPr>
         <w:tr>${headerCells}</w:tr>
         ${rowXml}
@@ -347,22 +389,52 @@ function generateDocxBuffer(input: FileGenerationInput): Buffer {
   </w:body>
 </w:document>`;
 
+  const stylesXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:docDefaults>
+    <w:rPrDefault>
+      <w:rPr>
+        <w:rFonts w:ascii="Cairo" w:hAnsi="Cairo" w:cs="Cairo"/>
+        <w:sz w:val="24"/>
+        <w:szCs w:val="24"/>
+        <w:lang w:val="ar-DZ" w:bidi="ar-DZ"/>
+        <w:rtl/>
+      </w:rPr>
+    </w:rPrDefault>
+    <w:pPrDefault>
+      <w:pPr>
+        <w:bidi/>
+        <w:jc w:val="right"/>
+        <w:spacing w:line="320" w:lineRule="auto"/>
+      </w:pPr>
+    </w:pPrDefault>
+  </w:docDefaults>
+</w:styles>`;
+
   const contentTypesXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
   <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
   <Default Extension="xml" ContentType="application/xml"/>
   <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+  <Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>
 </Types>`;
 
-  const relsXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+  const rootRelsXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
   <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
 </Relationships>`;
 
+  const docRelsXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
+</Relationships>`;
+
   return buildZipArchive([
     { name: '[Content_Types].xml', data: contentTypesXml },
-    { name: '_rels/.rels', data: relsXml },
+    { name: '_rels/.rels', data: rootRelsXml },
     { name: 'word/document.xml', data: documentXml },
+    { name: 'word/styles.xml', data: stylesXml },
+    { name: 'word/_rels/document.xml.rels', data: docRelsXml },
   ]);
 }
 
@@ -638,92 +710,435 @@ function generatePptxBuffer(input: FileGenerationInput): Buffer {
   return buildZipArchive(entries);
 }
 
-/* ───────────────────────── 4. PDF Generator ───────────────────────── */
+/* ───────────────────────── 4. PDF Generator (With Arabic & ToUnicode) ───────────────────────── */
 
-function toPdfHexText(text: string): string {
-  // Encode UTF-16BE BOM + characters as hex for universal PDF string compatibility + clean ASCII fallback in stream
-  const buf = Buffer.alloc(2 + text.length * 2);
-  buf.writeUInt16BE(0xfeff, 0);
-  for (let i = 0; i < text.length; i++) {
-    buf.writeUInt16BE(text.charCodeAt(i), 2 + i * 2);
+const ARABIC_LETTERS: Record<number, [number, number, number, number, boolean]> = {
+  0x0621: [0xFE80, 0xFE80, 0xFE80, 0xFE80, false], // Hamza
+  0x0622: [0xFE81, 0xFE81, 0xFE82, 0xFE82, false], // Alif with Madda
+  0x0623: [0xFE83, 0xFE83, 0xFE84, 0xFE84, false], // Alif with Hamza Above
+  0x0624: [0xFE85, 0xFE85, 0xFE86, 0xFE86, false], // Waw with Hamza
+  0x0625: [0xFE87, 0xFE87, 0xFE88, 0xFE88, false], // Alif with Hamza Below
+  0x0626: [0xFE89, 0xFE8B, 0xFE8C, 0xFE8A, true],  // Ya with Hamza
+  0x0627: [0xFE8D, 0xFE8D, 0xFE8E, 0xFE8E, false], // Alif
+  0x0628: [0xFE8F, 0xFE91, 0xFE92, 0xFE90, true],  // Ba
+  0x0629: [0xFE93, 0xFE93, 0xFE94, 0xFE94, false], // Ta Marbuta
+  0x062A: [0xFE95, 0xFE97, 0xFE98, 0xFE96, true],  // Ta
+  0x062B: [0xFE99, 0xFE9B, 0xFE9C, 0xFE9A, true],  // Tha
+  0x062C: [0xFE9D, 0xFE9F, 0xFEA0, 0xFE9E, true],  // Jim
+  0x062D: [0xFEA1, 0xFEA3, 0xFEA4, 0xFEA2, true],  // Hha
+  0x062E: [0xFEA5, 0xFEA7, 0xFEA8, 0xFEA6, true],  // Kha
+  0x062F: [0xFEA9, 0xFEA9, 0xFEAA, 0xFEAA, false], // Dal
+  0x0630: [0xFEAB, 0xFEAB, 0xFEAC, 0xFEAC, false], // Dhal
+  0x0631: [0xFEAD, 0xFEAD, 0xFEAE, 0xFEAE, false], // Ra
+  0x0632: [0xFEAF, 0xFEAF, 0xFEB0, 0xFEB0, false], // Zay
+  0x0633: [0xFEB1, 0xFEB3, 0xFEB4, 0xFEB2, true],  // Sin
+  0x0634: [0xFEB5, 0xFEB7, 0xFEB8, 0xFEB6, true],  // Shin
+  0x0635: [0xFEB9, 0xFEBB, 0xFEBC, 0xFEBA, true],  // Sad
+  0x0636: [0xFEBD, 0xFEBF, 0xFEC0, 0xFEBE, true],  // Dad
+  0x0637: [0xFEC1, 0xFEC3, 0xFEC4, 0xFEC2, true],  // Tah
+  0x0638: [0xFEC5, 0xFEC7, 0xFEC8, 0xFEC6, true],  // Zah
+  0x0639: [0xFEC9, 0xFECB, 0xFECC, 0xFECA, true],  // Ayn
+  0x063A: [0xFECD, 0xFECF, 0xFED0, 0xFECE, true],  // Ghayn
+  0x0641: [0xFED1, 0xFED3, 0xFED4, 0xFED2, true],  // Fa
+  0x0642: [0xFED5, 0xFED7, 0xFED8, 0xFED6, true],  // Qaf
+  0x0643: [0xFED9, 0xFEDB, 0xFEDC, 0xFEDA, true],  // Kaf
+  0x0644: [0xFEDD, 0xFEDF, 0xFEE0, 0xFEDE, true],  // Lam
+  0x0645: [0xFEE1, 0xFEE3, 0xFEE4, 0xFEE2, true],  // Mim
+  0x0646: [0xFEE5, 0xFEE7, 0xFEE8, 0xFEE6, true],  // Nun
+  0x0647: [0xFEE9, 0xFEEB, 0xFEEC, 0xFEEA, true],  // Ha
+  0x0648: [0xFEED, 0xFEED, 0xFEEE, 0xFEEE, false], // Waw
+  0x0649: [0xFEEF, 0xFEEF, 0xFEF0, 0xFEF0, false], // Alif Maqsura
+  0x064A: [0xFEF1, 0xFEF3, 0xFEF4, 0xFEF2, true],  // Ya
+};
+
+function reshapeArabicLine(text: string): string {
+  const chars = Array.from(String(text || ''));
+  const reshaped: string[] = [];
+
+  for (let i = 0; i < chars.length; i++) {
+    const code = chars[i].charCodeAt(0);
+    const entry = ARABIC_LETTERS[code];
+    if (!entry) {
+      reshaped.push(chars[i]);
+      continue;
+    }
+
+    // Lam-Alif ligatures
+    if (code === 0x0644 && i + 1 < chars.length) {
+      const nextCode = chars[i + 1].charCodeAt(0);
+      let lamAlifForm: [number, number] | null = null;
+      if (nextCode === 0x0622) lamAlifForm = [0xFEF5, 0xFEF6];
+      else if (nextCode === 0x0623) lamAlifForm = [0xFEF7, 0xFEF8];
+      else if (nextCode === 0x0625) lamAlifForm = [0xFEF9, 0xFEFA];
+      else if (nextCode === 0x0627) lamAlifForm = [0xFEFB, 0xFEFC];
+
+      if (lamAlifForm) {
+        const prevCode = i > 0 ? chars[i - 1].charCodeAt(0) : 0;
+        const prevEntry = ARABIC_LETTERS[prevCode];
+        const connectsWithPrev = prevEntry && prevEntry[4];
+        reshaped.push(String.fromCharCode(connectsWithPrev ? lamAlifForm[1] : lamAlifForm[0]));
+        i++;
+        continue;
+      }
+    }
+
+    const prevCode = i > 0 ? chars[i - 1].charCodeAt(0) : 0;
+    const prevEntry = ARABIC_LETTERS[prevCode];
+    const connectsWithPrev = prevEntry && prevEntry[4];
+
+    const nextCode = i + 1 < chars.length ? chars[i + 1].charCodeAt(0) : 0;
+    const nextEntry = ARABIC_LETTERS[nextCode];
+    const connectsWithNext = entry[4] && nextEntry !== undefined;
+
+    let glyphCode: number;
+    if (connectsWithPrev && connectsWithNext) {
+      glyphCode = entry[2];
+    } else if (connectsWithPrev) {
+      glyphCode = entry[3];
+    } else if (connectsWithNext) {
+      glyphCode = entry[1];
+    } else {
+      glyphCode = entry[0];
+    }
+    reshaped.push(String.fromCharCode(glyphCode));
   }
-  return `<${buf.toString('hex').toUpperCase()}>`;
+
+  // Reverse words containing Arabic for visual RTL drawing
+  const hasArabic = reshaped.some((c) => /[\u0600-\u06FF\uFB50-\uFDFF\uFE70-\uFEFC]/.test(c));
+  if (hasArabic) {
+    return reshaped.reverse().join('');
+  }
+  return reshaped.join('');
 }
 
-function escapePdfLiteral(str: string): string {
-  return str
-    .replace(/\\/g, '\\\\')
-    .replace(/\(/g, '\\(')
-    .replace(/\)/g, '\\)');
+function toUtf16Hex(text: string): string {
+  const buf = Buffer.alloc(text.length * 2);
+  for (let i = 0; i < text.length; i++) {
+    buf.writeUInt16BE(text.charCodeAt(i), i * 2);
+  }
+  return buf.toString('hex').toUpperCase();
+}
+
+function toActualTextHex(str: string): string {
+  const buf = Buffer.alloc(2 + str.length * 2);
+  buf.writeUInt16BE(0xfeff, 0); // UTF-16BE BOM
+  for (let i = 0; i < str.length; i++) {
+    buf.writeUInt16BE(str.charCodeAt(i), 2 + i * 2);
+  }
+  return '<' + buf.toString('hex').toUpperCase() + '>';
+}
+
+function buildToUnicodeCMap(): string {
+  const mappings: string[] = [];
+  // 1. ASCII range (English letters, numbers, punctuation)
+  for (let c = 0x0020; c <= 0x007e; c++) {
+    const hex = c.toString(16).padStart(4, '0').toUpperCase();
+    mappings.push(`<${hex}> <${hex}>`);
+  }
+  // 2. Canonical Arabic range (0x0600 - 0x06FF: letters, Arabic digits, Arabic punctuation)
+  for (let c = 0x0600; c <= 0x06ff; c++) {
+    const hex = c.toString(16).padStart(4, '0').toUpperCase();
+    mappings.push(`<${hex}> <${hex}>`);
+  }
+  // 3. Typographical punctuation & bullets
+  for (const c of [0x2013, 0x2014, 0x2022, 0x2026, 0x00ab, 0x00bb]) {
+    const hex = c.toString(16).padStart(4, '0').toUpperCase();
+    mappings.push(`<${hex}> <${hex}>`);
+  }
+  // 4. Arabic letter presentation forms mapping back to canonical Unicode
+  for (const [codeStr, entry] of Object.entries(ARABIC_LETTERS)) {
+    const origCode = Number(codeStr).toString(16).padStart(4, '0').toUpperCase();
+    const uniqueForms = Array.from(new Set([entry[0], entry[1], entry[2], entry[3]]));
+    for (const form of uniqueForms) {
+      const formHex = form.toString(16).padStart(4, '0').toUpperCase();
+      mappings.push(`<${formHex}> <${origCode}>`);
+    }
+  }
+  // 5. Lam-Alif ligatures
+  mappings.push('<FEF5> <06440622>', '<FEF6> <06440622>');
+  mappings.push('<FEF7> <06440623>', '<FEF8> <06440623>');
+  mappings.push('<FEF9> <06440625>', '<FEFA> <06440625>');
+  mappings.push('<FEFB> <06440627>', '<FEFC> <06440627>');
+
+  // Split into chunks of max 100 entries per block (strict ISO 32000-1 requirement)
+  const chunks: string[] = [];
+  const chunkSize = 100;
+  for (let i = 0; i < mappings.length; i += chunkSize) {
+    const chunk = mappings.slice(i, i + chunkSize);
+    chunks.push(`${chunk.length} beginbfchar\n${chunk.join('\n')}\nendbfchar`);
+  }
+
+  return `/CIDInit /ProcSet findresource begin
+12 dict begin
+begincmap
+/CIDSystemInfo << /Registry (Adobe) /Ordering (UCS) /Supplement 0 >> def
+/CMapName /Custom-ToUnicode def
+/CMapType 2 def
+1 begincodespacerange
+<0000> <FFFF>
+endcodespacerange
+${chunks.join('\n')}
+endcmap
+CMapName currentdict /CMap defineresource pop
+end
+end`;
+}
+
+interface EmbeddedFontCache {
+  fontName: string;
+  fontRaw: Buffer;
+  fontDeflated: Buffer;
+  cidToGidDeflated: Buffer;
+}
+
+let cachedArabicFont: EmbeddedFontCache | null = null;
+
+function getEmbeddedArabicFont(): EmbeddedFontCache | null {
+  if (cachedArabicFont) {
+    return cachedArabicFont;
+  }
+  try {
+    const fontPath = path.join(process.cwd(), 'src', 'server', 'assets', 'fonts', 'Amiri-Regular.ttf');
+    if (!fs.existsSync(fontPath)) {
+      return null;
+    }
+    const fontRaw = fs.readFileSync(fontPath);
+    const fontDeflated = zlib.deflateSync(fontRaw);
+
+    // Parse TrueType format 4 cmap subtable for exact character to glyph ID mapping
+    const numTables = fontRaw.readUInt16BE(4);
+    let cmapOffset = 0;
+    for (let i = 0; i < numTables; i++) {
+      const tag = fontRaw.toString('ascii', 12 + i * 16, 16 + i * 16);
+      if (tag === 'cmap') {
+        cmapOffset = fontRaw.readUInt32BE(12 + i * 16 + 8);
+        break;
+      }
+    }
+
+    if (cmapOffset === 0) return null;
+
+    const numSubtables = fontRaw.readUInt16BE(cmapOffset + 2);
+    let subOffset = 0;
+    for (let i = 0; i < numSubtables; i++) {
+      const platformID = fontRaw.readUInt16BE(cmapOffset + 4 + i * 8);
+      const encodingID = fontRaw.readUInt16BE(cmapOffset + 6 + i * 8);
+      if (platformID === 3 && encodingID === 1) {
+        subOffset = cmapOffset + fontRaw.readUInt32BE(cmapOffset + 8 + i * 8);
+        break;
+      }
+    }
+
+    if (subOffset === 0) return null;
+
+    const segCountX2 = fontRaw.readUInt16BE(subOffset + 6);
+    const segCount = segCountX2 / 2;
+    const endCodes: number[] = [];
+    for (let i = 0; i < segCount; i++) endCodes.push(fontRaw.readUInt16BE(subOffset + 14 + i * 2));
+    const startCodesOffset = subOffset + 16 + segCountX2;
+    const startCodes: number[] = [];
+    for (let i = 0; i < segCount; i++) startCodes.push(fontRaw.readUInt16BE(startCodesOffset + i * 2));
+    const idDeltasOffset = startCodesOffset + segCountX2;
+    const idDeltas: number[] = [];
+    for (let i = 0; i < segCount; i++) idDeltas.push(fontRaw.readInt16BE(idDeltasOffset + i * 2));
+    const idRangeOffsetsOffset = idDeltasOffset + segCountX2;
+    const idRangeOffsets: number[] = [];
+    for (let i = 0; i < segCount; i++) idRangeOffsets.push(fontRaw.readUInt16BE(idRangeOffsetsOffset + i * 2));
+
+    const getGid = (code: number): number => {
+      for (let i = 0; i < segCount; i++) {
+        if (endCodes[i] >= code) {
+          if (startCodes[i] > code) return 0;
+          if (idRangeOffsets[i] === 0) {
+            return (code + idDeltas[i]) & 0xFFFF;
+          } else {
+            const ro = idRangeOffsets[i];
+            const glyphIdxOffset = (idRangeOffsetsOffset + i * 2) + ro + (code - startCodes[i]) * 2;
+            const gid = fontRaw.readUInt16BE(glyphIdxOffset);
+            return gid !== 0 ? (gid + idDeltas[i]) & 0xFFFF : 0;
+          }
+        }
+      }
+      return 0;
+    };
+
+    const cidToGidBuf = Buffer.alloc(65536 * 2);
+    for (let c = 0; c < 65536; c++) {
+      cidToGidBuf.writeUInt16BE(getGid(c), c * 2);
+    }
+    const cidToGidDeflated = zlib.deflateSync(cidToGidBuf);
+
+    cachedArabicFont = {
+      fontName: 'Amiri-Regular',
+      fontRaw,
+      fontDeflated,
+      cidToGidDeflated,
+    };
+    return cachedArabicFont;
+  } catch (err) {
+    console.error('Failed to load embedded Arabic font:', err);
+    return null;
+  }
 }
 
 function generatePdfBuffer(input: FileGenerationInput): Buffer {
+  const embedded = getEmbeddedArabicFont();
+  const fontName = embedded?.fontName || 'Amiri-Regular';
+
   const rawLines = [
     input.title,
-    '='.repeat(Math.min(50, input.title.length + 10)),
+    '—'.repeat(Math.min(40, input.title.length + 8)),
     ...String(input.content || '').split(/\r?\n/),
   ];
 
-  // Build content stream with both readable text operators and embedded UTF-8 metadata stream
   const streamLines: string[] = ['BT', '/F1 13 Tf', '50 790 Td', '18 TL'];
-  for (const line of rawLines.slice(0, 42)) {
+  const maxLines = 45;
+  for (const line of rawLines.slice(0, maxLines)) {
     const clean = line.trim();
-    // Keep ASCII directly and also encode full Unicode hex comment/text for PDF extractors
-    const asciiSafe = clean.replace(/[^\x20-\x7E]/g, ' ');
-    streamLines.push(`(${escapePdfLiteral(asciiSafe || ' ')}) Tj T*`);
+    if (!clean) {
+      streamLines.push('T*');
+      continue;
+    }
+    const reshaped = reshapeArabicLine(clean);
+    const hex = toUtf16Hex(reshaped);
+    const actualTextParam = toActualTextHex(clean);
+    streamLines.push(`/Span << /ActualText ${actualTextParam} >> BDC`);
+    streamLines.push(`<${hex}> Tj`);
+    streamLines.push('EMC');
+    streamLines.push('T*');
   }
   streamLines.push('ET');
-  const contentStream = streamLines.join('\n');
+  const contentStream = streamLines.join('\n') + '\n';
+  const streamBuf = Buffer.from(contentStream, 'utf8');
 
-  // Also embed the full UTF-8 document text in an embedded stream object so any PDF reader/analyzer can read full Arabic & Latin text
-  const fullUtf8Payload = Buffer.from(
-    `${input.title}\n\n${input.content}`,
+  // Full UTF-8 text payload for universal extraction
+  const fullUtf8Payload = Buffer.from(`${input.title}\n\n${input.content}`, 'utf8');
+  const toUnicodeCMapStr = buildToUnicodeCMap();
+  const toUnicodeBuf = Buffer.from(toUnicodeCMapStr, 'utf8');
+
+  const objects: Array<{ id: number; data: Buffer }> = [];
+
+  // 1: Catalog (Tagged PDF for ActualText copy-paste support)
+  objects.push({
+    id: 1,
+    data: Buffer.from(`1 0 obj\n<< /Type /Catalog /Pages 2 0 R /Metadata 7 0 R /MarkInfo << /Marked true >> >>\nendobj\n`, 'utf8'),
+  });
+
+  // 2: Pages
+  objects.push({
+    id: 2,
+    data: Buffer.from(`2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n`, 'utf8'),
+  });
+
+  // 3: Page
+  objects.push({
+    id: 3,
+    data: Buffer.from(
+      `3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>\nendobj\n`,
+      'utf8'
+    ),
+  });
+
+  // 4: Content Stream
+  const obj4Header = Buffer.from(`4 0 obj\n<< /Length ${streamBuf.length} >>\nstream\n`, 'utf8');
+  const obj4Footer = Buffer.from(`\nendstream\nendobj\n`, 'utf8');
+  objects.push({
+    id: 4,
+    data: Buffer.concat([obj4Header, streamBuf, obj4Footer]),
+  });
+
+  // 5: Type0 Font with Identity-H and ToUnicode CMap
+  objects.push({
+    id: 5,
+    data: Buffer.from(
+      `5 0 obj\n<< /Type /Font /Subtype /Type0 /BaseFont /${fontName} /Encoding /Identity-H /DescendantFonts [6 0 R] /ToUnicode 8 0 R >>\nendobj\n`,
+      'utf8'
+    ),
+  });
+
+  // 6: CIDFontType2 (Links to FontDescriptor and embedded CIDToGIDMap)
+  const cidFontExtra = embedded
+    ? `/FontDescriptor 9 0 R /CIDToGIDMap 10 0 R`
+    : `/CIDToGIDMap /Identity`;
+  objects.push({
+    id: 6,
+    data: Buffer.from(
+      `6 0 obj\n<< /Type /Font /Subtype /CIDFontType2 /BaseFont /${fontName} /CIDSystemInfo << /Registry (Adobe) /Ordering (Identity) /Supplement 0 >> ${cidFontExtra} /W [ 0 65535 600 ] >>\nendobj\n`,
+      'utf8'
+    ),
+  });
+
+  // 7: Full UTF-8 Payload & Metadata
+  const obj7Header = Buffer.from(
+    `7 0 obj\n<< /Type /Metadata /Subtype /XML /Length ${fullUtf8Payload.length} >>\nstream\n`,
     'utf8'
   );
+  const obj7Footer = Buffer.from(`\nendstream\nendobj\n`, 'utf8');
+  objects.push({
+    id: 7,
+    data: Buffer.concat([obj7Header, fullUtf8Payload, obj7Footer]),
+  });
 
-  const objects: string[] = [];
-  // 1: Catalog
-  objects.push(
-    `1 0 obj\n<< /Type /Catalog /Pages 2 0 R /Metadata 6 0 R >>\nendobj\n`
-  );
-  // 2: Pages
-  objects.push(
-    `2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n`
-  );
-  // 3: Page
-  objects.push(
-    `3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>\nendobj\n`
-  );
-  // 4: Page Content Stream
-  objects.push(
-    `4 0 obj\n<< /Length ${Buffer.byteLength(contentStream, 'utf8')} >>\nstream\n${contentStream}\nendstream\nendobj\n`
-  );
-  // 5: Font
-  objects.push(
-    `5 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n`
-  );
-  // 6: Full UTF-8 Text & Metadata Stream
-  const utf8StreamStr = fullUtf8Payload.toString('utf8');
-  objects.push(
-    `6 0 obj\n<< /Type /Metadata /Subtype /XML /Title ${toPdfHexText(input.title)} /Length ${fullUtf8Payload.length} >>\nstream\n${utf8StreamStr}\nendstream\nendobj\n`
-  );
+  // 8: ToUnicode CMap Stream
+  const obj8Header = Buffer.from(`8 0 obj\n<< /Length ${toUnicodeBuf.length} >>\nstream\n`, 'utf8');
+  const obj8Footer = Buffer.from(`\nendstream\nendobj\n`, 'utf8');
+  objects.push({
+    id: 8,
+    data: Buffer.concat([obj8Header, toUnicodeBuf, obj8Footer]),
+  });
 
-  let pdf = '%PDF-1.4\n%\xE2\xE3\xCF\xD3\n';
+  if (embedded) {
+    // 9: FontDescriptor with FontFile2 reference
+    objects.push({
+      id: 9,
+      data: Buffer.from(
+        `9 0 obj\n<< /Type /FontDescriptor /FontName /${fontName} /Flags 4 /FontBBox [-438 -900 11467 1815] /ItalicAngle 0 /Ascent 1124 /Descent -634 /CapHeight 700 /StemV 80 /FontFile2 11 0 R >>\nendobj\n`,
+        'utf8'
+      ),
+    });
+
+    // 10: CIDToGIDMap Stream (deflated)
+    const obj10Header = Buffer.from(
+      `10 0 obj\n<< /Length ${embedded.cidToGidDeflated.length} /Filter /FlateDecode >>\nstream\n`,
+      'utf8'
+    );
+    const obj10Footer = Buffer.from(`\nendstream\nendobj\n`, 'utf8');
+    objects.push({
+      id: 10,
+      data: Buffer.concat([obj10Header, embedded.cidToGidDeflated, obj10Footer]),
+    });
+
+    // 11: Embedded FontFile2 (Amiri-Regular TrueType font program)
+    const obj11Header = Buffer.from(
+      `11 0 obj\n<< /Length ${embedded.fontDeflated.length} /Length1 ${embedded.fontRaw.length} /Filter /FlateDecode >>\nstream\n`,
+      'utf8'
+    );
+    const obj11Footer = Buffer.from(`\nendstream\nendobj\n`, 'utf8');
+    objects.push({
+      id: 11,
+      data: Buffer.concat([obj11Header, embedded.fontDeflated, obj11Footer]),
+    });
+  }
+
+  let offset = Buffer.from('%PDF-1.4\n%\xE2\xE3\xCF\xD3\n', 'utf8').length;
   const offsets: number[] = [];
+  const parts: Buffer[] = [Buffer.from('%PDF-1.4\n%\xE2\xE3\xCF\xD3\n', 'utf8')];
+
   for (const obj of objects) {
-    offsets.push(Buffer.byteLength(pdf, 'utf8'));
-    pdf += obj;
+    offsets.push(offset);
+    parts.push(obj.data);
+    offset += obj.data.length;
   }
 
-  const xrefOffset = Buffer.byteLength(pdf, 'utf8');
-  pdf += `xref\n0 ${objects.length + 1}\n`;
-  pdf += `0000000000 65535 f \n`;
+  const xrefOffset = offset;
+  let xref = `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
   for (const off of offsets) {
-    pdf += `${String(off).padStart(10, '0')} 00000 n \n`;
+    xref += `${String(off).padStart(10, '0')} 00000 n \n`;
   }
-  pdf += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF\n`;
+  xref += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF\n`;
+  parts.push(Buffer.from(xref, 'utf8'));
 
-  return Buffer.from(pdf, 'utf8');
+  return Buffer.concat(parts);
 }
 
 /* ───────────────────────── 5. CSV / HTML / MD / TXT ───────────────────────── */
@@ -775,14 +1190,56 @@ function generateHtmlBuffer(input: FileGenerationInput): Buffer {
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>${escapeXml(input.title)} — تيدكلت AI</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800&family=Tajawal:wght@400;500;700&display=swap" rel="stylesheet">
   <style>
     body {
-      font-family: 'Cairo', 'Tajawal', system-ui, sans-serif;
+      font-family: 'Cairo', 'Tajawal', system-ui, -apple-system, sans-serif;
       background: #FAF6F0;
       color: #1F2937;
       margin: 0;
-      padding: 40px 24px;
+      padding: 24px;
       line-height: 1.8;
+      direction: rtl;
+    }
+    .toolbar {
+      max-width: 860px;
+      margin: 0 auto 20px auto;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      background: #FFFFFF;
+      padding: 12px 20px;
+      border-radius: 14px;
+      border: 1px solid #E5DCCB;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+    }
+    .toolbar-title {
+      font-weight: 800;
+      font-size: 14px;
+      color: #92400E;
+    }
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 8px 16px;
+      border-radius: 10px;
+      font-size: 12px;
+      font-weight: 700;
+      cursor: pointer;
+      text-decoration: none;
+      border: none;
+      transition: all 0.2s;
+    }
+    .btn-print {
+      background: #D97706;
+      color: #FFFFFF;
+    }
+    .btn-print:hover {
+      background: #B45309;
     }
     .container {
       max-width: 860px;
@@ -790,22 +1247,52 @@ function generateHtmlBuffer(input: FileGenerationInput): Buffer {
       background: #FFFFFF;
       border: 1px solid #E5DCCB;
       border-radius: 16px;
-      padding: 36px;
+      padding: 40px;
       box-shadow: 0 8px 24px rgba(146, 64, 14, 0.06);
     }
-    h1 { color: #92400E; border-bottom: 2px solid #FDE68A; padding-bottom: 12px; }
-    h2, h3 { color: #B45309; margin-top: 24px; }
-    table { width: 100%; border-collapse: collapse; margin: 20px 0; }
-    th, td { border: 1px solid #E5DCCB; padding: 10px 14px; text-align: right; }
-    th { background: #FEF3C7; color: #92400E; }
-    .footer { margin-top: 32px; font-size: 12px; color: #6B7280; text-align: center; }
+    h1 { color: #92400E; border-bottom: 2px solid #FDE68A; padding-bottom: 12px; margin-top: 0; font-size: 26px; }
+    h2 { color: #B45309; margin-top: 24px; font-size: 20px; border-bottom: 1px solid #FEF3C7; padding-bottom: 6px; }
+    h3 { color: #92400E; margin-top: 20px; font-size: 16px; }
+    p { margin: 12px 0; font-size: 14px; color: #374151; }
+    li { margin: 6px 0; font-size: 14px; color: #374151; }
+    table { width: 100%; border-collapse: collapse; margin: 24px 0; }
+    th, td { border: 1px solid #E5DCCB; padding: 10px 14px; text-align: right; font-size: 13px; }
+    th { background: #FEF3C7; color: #92400E; font-weight: 800; }
+    .footer { margin-top: 36px; padding-top: 16px; border-top: 1px solid #E5DCCB; font-size: 11.5px; color: #6B7280; text-align: center; }
+
+    @media print {
+      body {
+        background: #FFFFFF !important;
+        color: #000000 !important;
+        padding: 0 !important;
+      }
+      .toolbar {
+        display: none !important;
+      }
+      .container {
+        max-width: 100% !important;
+        border: none !important;
+        box-shadow: none !important;
+        padding: 0 !important;
+      }
+      @page {
+        size: A4;
+        margin: 20mm;
+      }
+    }
   </style>
 </head>
 <body>
+  <div class="toolbar">
+    <div class="toolbar-title">📄 مستند تيدكلت AI — نسخة منسقة للطباعة و PDF</div>
+    <div>
+      <button onclick="window.print()" class="btn btn-print">🖨️ طباعة أو حفظ كـ PDF</button>
+    </div>
+  </div>
   <div class="container">
     <h1>${escapeXml(input.title)}</h1>
     ${paragraphs}
-    <div class="footer">تم الإنشاء بواسطة تيدكلت AI • ${new Date().toLocaleDateString('ar-DZ')}</div>
+    <div class="footer">تم الإنشاء بواسطة تيدكلت AI • عين صالح، الجزائر • ${new Date().toLocaleDateString('ar-DZ')}</div>
   </div>
 </body>
 </html>`;
@@ -880,11 +1367,11 @@ export function generateAndVerifyFile(input: FileGenerationInput): GeneratedFile
       fileBuffer = generateHtmlBuffer(input);
       break;
     case 'md':
-      fileBuffer = Buffer.from(`# ${input.title}\n\n${input.content}`, 'utf8');
+      fileBuffer = Buffer.from(`\uFEFF# ${input.title}\n\n${input.content}`, 'utf8');
       break;
     case 'txt':
     default:
-      fileBuffer = Buffer.from(`${input.title}\n${'='.repeat(40)}\n\n${input.content}`, 'utf8');
+      fileBuffer = Buffer.from(`\uFEFF${input.title}\n${'='.repeat(40)}\n\n${input.content}`, 'utf8');
       break;
   }
 

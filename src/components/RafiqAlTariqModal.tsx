@@ -667,7 +667,7 @@ export const RafiqAlTariqModal: React.FC<RafiqAlTariqModalProps> = ({
       dir="rtl"
       role={embedded ? 'region' : 'dialog'}
       aria-modal={embedded ? undefined : 'true'}
-      aria-label="رفيق الطريق | تيديكلت AI"
+      aria-label={lang === 'ar' ? 'كاش بلاصة معك | تيديكلت AI' : 'Kash Bilasa | Tidikelt AI'}
     >
       {/* SVG Sprite Symbols */}
       <svg width="0" height="0" className="sr" aria-hidden="true">
@@ -789,7 +789,7 @@ export const RafiqAlTariqModal: React.FC<RafiqAlTariqModalProps> = ({
             <span className="mark">
               <Icon name="wheel" />
             </span>
-            <span>رفيق الطريق</span>
+            <span title="Kash Bilasa">{lang === 'ar' ? 'كاش بلاصة معك' : 'Kash Bilasa'}</span>
           </div>
           <button
             className="icon-btn"
@@ -1410,7 +1410,7 @@ export const RafiqAlTariqModal: React.FC<RafiqAlTariqModalProps> = ({
             className="dlg-box"
             role="dialog"
             aria-modal="true"
-            aria-label="لوحة تحكم المالك — رفيق الطريق"
+            aria-label={lang === 'ar' ? 'لوحة تحكم المالك — كاش بلاصة معك' : 'Owner Panel — Kash Bilasa'}
           >
             <div className="dlg">
               <h2>

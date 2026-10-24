@@ -19,14 +19,14 @@ export const FILE_FORMAT_OPTIONS: Array<{
   label: string;
   badge: string;
 }> = [
+  { format: 'docx', label: 'مستند Word (DOCX)', badge: 'DOCX' },
   { format: 'pdf', label: 'ملف PDF رسمي', badge: 'PDF' },
-  { format: 'docx', label: 'مستند Word', badge: 'DOCX' },
   { format: 'xlsx', label: 'جدول Excel بالمعادلات', badge: 'XLSX' },
   { format: 'pptx', label: 'عرض PowerPoint', badge: 'PPTX' },
-  { format: 'csv', label: 'بيانات CSV', badge: 'CSV' },
+  { format: 'txt', label: 'ملف نصي عربي (TXT)', badge: 'TXT' },
   { format: 'md', label: 'مستند Markdown', badge: 'MD' },
-  { format: 'html', label: 'صفحة ويب HTML', badge: 'HTML' },
-  { format: 'txt', label: 'ملف نصي TXT', badge: 'TXT' },
+  { format: 'html', label: 'صفحة ويب منسقة للطباعة', badge: 'HTML' },
+  { format: 'csv', label: 'بيانات CSV', badge: 'CSV' },
 ];
 
 function formatFileSize(bytes: number): string {
@@ -64,17 +64,17 @@ export const GeneratedFileCard: React.FC<{ file: GeneratedFileInfo }> = ({ file 
             target="_blank"
             rel="noopener noreferrer"
             className="px-2.5 py-1.5 rounded-xl bg-[var(--card)] hover:bg-[var(--line)]/40 border border-[var(--line)] text-[var(--ink)] text-[11px] font-bold flex items-center gap-1 transition-colors"
-            title="معاينة الملف"
+            title={file.format === 'pdf' ? 'معاينة وطباعة المستند' : 'معاينة الملف'}
           >
             <Eye className="w-3.5 h-3.5" />
-            <span>معاينة</span>
+            <span>{file.format === 'pdf' ? 'معاينة وطباعة' : 'معاينة'}</span>
           </a>
         )}
         <a
           href={file.downloadUrl}
           download={file.filename}
           className="px-3 py-1.5 rounded-xl bg-[var(--green)] hover:opacity-90 text-white text-[11px] font-bold flex items-center gap-1.5 shadow-2xs transition-opacity"
-          title="تنزيل الملف"
+          title="تنزيل الملف المكتبي"
         >
           <FileDown className="w-3.5 h-3.5" />
           <span>تنزيل ({file.format.toUpperCase()})</span>

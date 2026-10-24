@@ -1,4 +1,4 @@
-const CACHE_NAME = 'tidikelt-ai-v4';
+const CACHE_NAME = 'tidikelt-ai-v5';
 const OFFLINE_URL = '/offline.html';
 
 const PRECACHE_ASSETS = [
@@ -43,11 +43,14 @@ self.addEventListener('fetch', (event) => {
 
   const url = new URL(request.url);
 
-  // Never intercept or cache APK binary downloads or APK management endpoints
+  // Never intercept or cache APK binary downloads, APK management endpoints, or Vite dev modules
   if (
     url.pathname.startsWith('/downloads/') ||
     url.pathname.startsWith('/api/apk/') ||
-    url.pathname.endsWith('.apk')
+    url.pathname.endsWith('.apk') ||
+    url.pathname.startsWith('/src/') ||
+    url.pathname.startsWith('/@') ||
+    url.pathname.startsWith('/node_modules/')
   ) {
     return;
   }
@@ -87,20 +90,16 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Static assets: Stale-While-Revalidate
+  // Static assets: Network-first with cache fallback so mobile devices always get latest updates
   event.respondWith(
-    caches.match(request).then((cachedResponse) => {
-      const fetchPromise = fetch(request)
-        .then((networkResponse) => {
-          if (networkResponse && networkResponse.status === 200) {
-            const cloned = networkResponse.clone();
-            caches.open(CACHE_NAME).then((cache) => cache.put(request, cloned));
-          }
-          return networkResponse;
-        })
-        .catch(() => cachedResponse);
-
-      return cachedResponse || fetchPromise;
-    })
+    fetch(request)
+      .then((networkResponse) => {
+        if (networkResponse && networkResponse.status === 200) {
+          const cloned = networkResponse.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put(request, cloned));
+        }
+        return networkResponse;
+      })
+      .catch(() => caches.match(request))
   );
 });

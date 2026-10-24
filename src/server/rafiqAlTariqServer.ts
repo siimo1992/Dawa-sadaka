@@ -33,7 +33,7 @@ export interface RafiqFunctionCallResult {
   args: Record<string, any>;
 }
 
-export const RAFIQ_SYSTEM_INSTRUCTION = `أنت العقل المدبر لمنصة "رفيق الطريق" في الجزائر لمشاركة الرحلات بين الولايات.
+export const RAFIQ_SYSTEM_INSTRUCTION = `أنت العقل المدبر لمنصة "كاش بلاصة معك" (Kash Bilasa) في الجزائر لمشاركة الرحلات بين الولايات.
 مهمتك هي فهم رسائل السائقين والمسافرين المكتوبة باللغة العربية أو الدارجة الجزائرية، واستخراج البيانات بدقة لاستدعاء الدالة البرمجية المناسبة.
 
 قواعد الفهم:
@@ -678,7 +678,7 @@ export function registerRafiqAlTariqRoutes(app: Express, ai: GoogleGenAI) {
               ? 'ولاية الانطلاق (منين راك مقلع؟)'
               : 'ولاية الوجهة (لوين راك قاصد؟)';
           return res.json({
-            reply: `مرحبا بيك خويا في رفيق الطريق! يخصني غير تقولي ${missingPart} باش نكملولك الطلب في الحين.`,
+            reply: `مرحبا بيك خويا في "كاش بلاصة معك" (Kash Bilasa)! يخصني غير تقولي ${missingPart} باش نكملولك الطلب في الحين.`,
             functionCall: null,
             needsClarification: true,
             rides: ridesStore,
@@ -852,7 +852,7 @@ export function registerRafiqAlTariqRoutes(app: Express, ai: GoogleGenAI) {
       return res.json({
         reply:
           assistantReply ||
-          'مرحبا بيك في منصة "رفيق الطريق"! قولي برك من أي ولاية راك مقلع ولوين راك حاب تروح، وواش راك سائق ولا مسافر؟',
+          'مرحبا بيك في منصة "كاش بلاصة معك" (Kash Bilasa)! قولي برك من أي ولاية راك مقلع ولوين راك حاب تروح، وواش راك سائق ولا مسافر؟',
         functionCall: null,
         needsClarification: true,
         rides: ridesStore,

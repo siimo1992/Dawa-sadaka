@@ -164,7 +164,7 @@ function buildDefaultApkConfig(lastResetAt?: number): ApkReleaseConfig {
     fileName: 'tidikelt-ai-release.apk',
     originalUploadedName: '',
     releaseNotes:
-      'النسخة الرسمية لمنصة تيديكلت AI على أندرويد — دعم المحادثة الذكية، رفيق الطريق، ومستجدات عين صالح.',
+      'النسخة الرسمية لمنصة تيديكلت AI على أندرويد — دعم المحادثة الذكية، كاش بلاصة معك (Kash Bilasa)، ومستجدات عين صالح.',
     updatedAt: now,
     lastResetAt: lastResetAt || now,
     hasCustomUploadedApk: activeFile.isValid,

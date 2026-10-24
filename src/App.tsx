@@ -934,36 +934,21 @@ export default function App() {
   const isOnline = useOnlineStatus();
   const [showIOSInstallGuide, setShowIOSInstallGuide] = useState(false);
 
-  // Real-Time Live Clock State (Synchronized second-by-second with Algiers / local time)
-  const [liveClockTime, setLiveClockTime] = useState<Date>(() => new Date());
+  // Sync mobile visualViewport height so virtual keyboards on iOS/Android never cover the input bar
   useEffect(() => {
-    const timer = setInterval(() => {
-      setLiveClockTime(new Date());
-    }, 1000);
-    return () => clearInterval(timer);
+    if (typeof window === 'undefined' || !window.visualViewport) return;
+    const vv = window.visualViewport;
+    const updateViewportHeight = () => {
+      document.documentElement.style.setProperty('--app-viewport-height', `${vv.height}px`);
+    };
+    updateViewportHeight();
+    vv.addEventListener('resize', updateViewportHeight);
+    vv.addEventListener('scroll', updateViewportHeight);
+    return () => {
+      vv.removeEventListener('resize', updateViewportHeight);
+      vv.removeEventListener('scroll', updateViewportHeight);
+    };
   }, []);
-
-  const liveFormattedClock = useMemo(() => {
-    const d = liveClockTime;
-    const time24 = d.toLocaleTimeString(lang === 'ar' ? 'ar-DZ' : lang === 'fr' ? 'fr-FR' : 'en-US', {
-      timeZone: 'Africa/Algiers',
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit',
-      hour12: false,
-    });
-    const day = d.toLocaleDateString(lang === 'ar' ? 'ar-DZ' : lang === 'fr' ? 'fr-FR' : 'en-US', {
-      timeZone: 'Africa/Algiers',
-      weekday: 'short',
-    });
-    const fullDate = d.toLocaleDateString(lang === 'ar' ? 'ar-DZ' : lang === 'fr' ? 'fr-FR' : 'en-US', {
-      timeZone: 'Africa/Algiers',
-      day: 'numeric',
-      month: 'short',
-      year: 'numeric',
-    });
-    return { time24, day, fullDate };
-  }, [liveClockTime, lang]);
 
   // Visitor Location State (GPS / Phone Geolocation & Algeria Wilaya adaptation)
   const [visitorLocation, setVisitorLocation] = useState<VisitorLocationState>(() => {
@@ -1078,10 +1063,10 @@ export default function App() {
     return <span className="shrink-0">{fallback}</span>;
   };
 
-  // Auto-detect visitor location on phone/browser via GPS geolocation
+  // Auto-detect visitor location on phone/browser via GPS geolocation ONLY if permission is already granted
+  // (Prevents an unexpected OS geolocation dialog from stealing focus and dismissing the mobile keyboard)
   useEffect(() => {
     if (typeof window !== 'undefined' && navigator.geolocation) {
-      // If user already had a recent GPS location detected, skip duplicate prompt
       const saved = localStorage.getItem('visitor_location');
       if (saved) {
         try {
@@ -1092,28 +1077,40 @@ export default function App() {
         } catch {}
       }
 
-      navigator.geolocation.getCurrentPosition(
-        (position) => {
-          const lat = position.coords.latitude;
-          const lng = position.coords.longitude;
-          const nearest = findNearestWilaya(lat, lng);
-          const newLoc: VisitorLocationState = {
-            wilaya: nearest,
-            lat,
-            lng,
-            isGps: true,
-            accuracyMeters: position.coords.accuracy,
-            detectedAt: Date.now(),
-          };
-          setVisitorLocation(newLoc);
-          localStorage.setItem('visitor_location', JSON.stringify(newLoc));
-        },
-        (err) => {
-          // Softly fallback if user declined or outside GPS coverage
-          console.debug('Visitor GPS permission or detection info:', err.message);
-        },
-        { enableHighAccuracy: true, timeout: 12000, maximumAge: 60000 }
-      );
+      const fetchPositionSilently = () => {
+        navigator.geolocation.getCurrentPosition(
+          (position) => {
+            const lat = position.coords.latitude;
+            const lng = position.coords.longitude;
+            const nearest = findNearestWilaya(lat, lng);
+            const newLoc: VisitorLocationState = {
+              wilaya: nearest,
+              lat,
+              lng,
+              isGps: true,
+              accuracyMeters: position.coords.accuracy,
+              detectedAt: Date.now(),
+            };
+            setVisitorLocation(newLoc);
+            localStorage.setItem('visitor_location', JSON.stringify(newLoc));
+          },
+          (err) => {
+            console.debug('Visitor GPS permission or detection info:', err.message);
+          },
+          { enableHighAccuracy: true, timeout: 12000, maximumAge: 60000 }
+        );
+      };
+
+      if (navigator.permissions && typeof navigator.permissions.query === 'function') {
+        navigator.permissions
+          .query({ name: 'geolocation' })
+          .then((status) => {
+            if (status.state === 'granted') {
+              fetchPositionSilently();
+            }
+          })
+          .catch(() => {});
+      }
     }
   }, []);
 
@@ -1262,9 +1259,32 @@ export default function App() {
     setIsSending(false);
   };
 
-  const handleCopyText = (id: string, text: string) => {
-    if (navigator.clipboard) {
-      navigator.clipboard.writeText(text);
+  const handleCopyText = async (id: string, text: string) => {
+    let copied = false;
+    try {
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(text);
+        copied = true;
+      }
+    } catch {
+      // fallback to DOM execCommand
+    }
+    if (!copied) {
+      try {
+        const textarea = document.createElement('textarea');
+        textarea.value = text;
+        textarea.style.position = 'fixed';
+        textarea.style.left = '-999999px';
+        textarea.style.top = '-999999px';
+        textarea.setAttribute('readonly', '');
+        document.body.appendChild(textarea);
+        textarea.focus();
+        textarea.select();
+        copied = document.execCommand('copy');
+        document.body.removeChild(textarea);
+      } catch (err) {
+        console.error('Fallback copy failed:', err);
+      }
     }
     setCopiedMessageId(id);
     setTimeout(() => setCopiedMessageId(null), 2000);
@@ -2734,13 +2754,14 @@ export default function App() {
     };
   }, [notificationsPermanentlyDisabled]);
 
-  // Timer for trip countdown
+  // Timer for trip countdown (only active when a trip is registered)
   useEffect(() => {
+    if (!trip) return;
     const timer = setInterval(() => {
       setTick((t) => t + 1);
     }, 15000);
     return () => clearInterval(timer);
-  }, []);
+  }, [trip]);
 
   // Scroll to bottom on message change
   useEffect(() => {
@@ -2749,11 +2770,17 @@ export default function App() {
     }
   }, [messages, view, isSending]);
 
-  // Auto-resize textarea like ChatGPT / Claude
+  // Auto-resize textarea without disrupting mobile virtual keyboard IME composition
   useEffect(() => {
-    if (textareaRef.current) {
-      textareaRef.current.style.height = 'auto';
-      textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 140)}px`;
+    const el = textareaRef.current;
+    if (!el) return;
+    if (!inputText) {
+      el.style.height = '42px';
+      return;
+    }
+    const targetHeight = Math.min(Math.max(el.scrollHeight, 42), 140);
+    if (el.style.height !== `${targetHeight}px`) {
+      el.style.height = `${targetHeight}px`;
     }
   }, [inputText]);
 
@@ -3720,7 +3747,7 @@ export default function App() {
   const currentAlertStyle = getAlertStyle(weatherAlert.severity);
 
   return (
-    <div className="h-[100dvh] w-full max-w-[100vw] flex overflow-hidden bg-[var(--bg)] text-[var(--ink)] font-sans selection:bg-[#2F5D50] selection:text-white relative">
+    <div className="h-[var(--app-viewport-height,100dvh)] w-full max-w-[100vw] flex overflow-hidden bg-[var(--bg)] text-[var(--ink)] font-sans selection:bg-[#2F5D50] selection:text-white relative">
       {/* Hidden audio element for voice playback */}
       <audio
         ref={audioRef}
@@ -3841,14 +3868,16 @@ export default function App() {
             : sidebarWidthStep === 2
             ? 'w-80 md:w-80 lg:w-[340px]'
             : 'w-[88vw] max-w-[380px] md:w-96 lg:w-[400px]'
-        } bg-[var(--card)] border-e border-[var(--line)] flex flex-col transition-transform duration-200 ease-in-out shrink-0 select-none ${
-          isMindFocusMode ? 'hidden' : !isSidebarOpen ? 'flex md:hidden' : 'flex'
-        } ${
-          isMobileSidebarOpen && !isMindFocusMode
-            ? 'translate-x-0 shadow-2xl max-md:visible max-md:pointer-events-auto'
-            : lang === 'ar'
-            ? 'translate-x-full md:translate-x-0 max-md:invisible max-md:pointer-events-none'
-            : '-translate-x-full md:translate-x-0 max-md:invisible max-md:pointer-events-none'
+        } bg-[var(--card)] border-e border-[var(--line)] flex-col transition-transform duration-200 ease-in-out shrink-0 select-none ${
+          isMindFocusMode
+            ? 'hidden'
+            : isMobileSidebarOpen
+            ? !isSidebarOpen
+              ? 'flex md:hidden translate-x-0 shadow-2xl pointer-events-auto'
+              : 'flex translate-x-0 shadow-2xl pointer-events-auto'
+            : !isSidebarOpen
+            ? 'hidden'
+            : 'hidden md:flex md:translate-x-0'
         }`}
       >
         {/* Horizontal Drag-to-Resize Handle on Sidebar Edge */}
@@ -4072,17 +4101,6 @@ export default function App() {
                                     <Pencil className="w-3 h-3 text-[var(--mute)] shrink-0" />
                                     <span>{t.renameSession}</span>
                                   </button>
-                                  <button
-                                    type="button"
-                                    onClick={(e) => {
-                                      handleExportSession(session, e);
-                                      setOpenSessionMenuId(null);
-                                    }}
-                                    className="w-full flex items-center gap-2 px-2.5 py-1.5 text-[11px] font-medium text-[var(--ink)] hover:bg-[var(--bg)] transition-colors cursor-pointer text-start"
-                                  >
-                                    <Download className="w-3 h-3 text-[var(--mute)] shrink-0" />
-                                    <span>{t.exportSession}</span>
-                                  </button>
                                   <div className="my-0.5 border-t border-[var(--line)]/60" />
                                   <button
                                     type="button"
@@ -4168,30 +4186,29 @@ export default function App() {
                   )}
                 </button>
 
-                <button
-                  type="button"
-                  onClick={() =>
-                    setSidebarWidthStep((prev) => ((prev + 1) % 4) as 0 | 1 | 2 | 3)
-                  }
-                  className="hidden md:flex px-1.5 py-0.5 rounded-md bg-[var(--bg)] hover:bg-[var(--green)]/15 border border-[var(--line)] text-[9px] font-bold text-[var(--mute)] hover:text-[var(--green)] transition-colors cursor-pointer items-center gap-0.5"
-                  title="تغيير عرض الشريط الجانبي (تقصير / تمديد)"
-                >
-                  <span>
-                    {sidebarWidthStep === 0
-                      ? 'ضيق'
-                      : sidebarWidthStep === 1
-                      ? 'عادي'
-                      : sidebarWidthStep === 2
-                      ? 'واسع'
-                      : 'عريض'}
-                  </span>
-                </button>
               </div>
             </div>
 
             {isSidebarNavCompact ? (
-              /* Compact Single-Row Bar Mode: Chat, News, Rafiq */
+              /* Compact Single-Row Bar Mode: Rafiq/Kash Bilasa first, then Chat, News */
               <div className="grid grid-cols-3 gap-1">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setView('rides');
+                    setIsMobileSidebarOpen(false);
+                  }}
+                  title={lang === 'ar' ? 'كاش بلاصة معك (Kash Bilasa) — مشاركة الرحلات بين الولايات' : 'Kash Bilasa — Inter-Wilaya Ride Sharing'}
+                  className={`flex items-center justify-center gap-1 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer border ${
+                    view === 'rides'
+                      ? 'bg-[var(--green)]/20 border-[var(--green)]/40 text-[var(--green)]'
+                      : 'bg-[var(--bg)]/60 border-[var(--line)] text-[var(--ink)] hover:bg-[var(--bg)]'
+                  }`}
+                >
+                  <Car className="w-3.5 h-3.5" />
+                  <span>{lang === 'ar' ? 'كاش بلاصة معك' : 'Kash Bilasa'}</span>
+                </button>
+
                 <button
                   type="button"
                   onClick={() => {
@@ -4225,27 +4242,34 @@ export default function App() {
                   <span className="text-xs leading-none">📰</span>
                   <span>الأخبار</span>
                 </button>
-
+              </div>
+            ) : (
+              <div className="space-y-1.5">
+                {/* 1. Top Highlight: Kash Bilasa Inter-Wilaya Ride Sharing (Moved to Top) */}
                 <button
                   type="button"
                   onClick={() => {
                     setView('rides');
                     setIsMobileSidebarOpen(false);
                   }}
-                  title="رفيق الطريق — مشاركة الرحلات بين الولايات"
-                  className={`flex items-center justify-center gap-1 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer border ${
+                  className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-semibold transition-all cursor-pointer border ${
                     view === 'rides'
-                      ? 'bg-[var(--green)]/20 border-[var(--green)]/40 text-[var(--green)]'
-                      : 'bg-[var(--bg)]/60 border-[var(--line)] text-[var(--ink)] hover:bg-[var(--bg)]'
+                      ? 'bg-[var(--green)]/20 border-[var(--green)] text-[var(--green)] font-bold shadow-xs'
+                      : 'text-[var(--ink)] hover:bg-[var(--bg)] border-[var(--green)]/30 bg-[var(--green)]/10'
                   }`}
                 >
-                  <Car className="w-3.5 h-3.5" />
-                  <span>رفيق الطريق</span>
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <Car className="w-4 h-4 text-[var(--green)] shrink-0" />
+                    <span className="truncate font-bold">
+                      {lang === 'ar' ? 'كاش بلاصة معك · مشاركة الرحلات' : 'Kash Bilasa · Ride Sharing'}
+                    </span>
+                  </div>
+                  <span className="text-[10px] font-mono tabular-nums text-[var(--green)] font-bold shrink-0">
+                    58 ولاية
+                  </span>
                 </button>
-              </div>
-            ) : (
-              <div className="space-y-1.5">
-                {/* 1. Primary Highlight: Smart Chat */}
+
+                {/* 2. Highlight: Smart Chat */}
                 <button
                   onClick={() => {
                     setView('chat');
@@ -4268,7 +4292,7 @@ export default function App() {
                   )}
                 </button>
 
-                {/* 2. Primary Highlight: Local News */}
+                {/* 3. Highlight: Local News */}
                 <button
                   onClick={() => {
                     setView('news');
@@ -4289,30 +4313,6 @@ export default function App() {
                       {approvedNews.length}
                     </span>
                   )}
-                </button>
-
-                {/* 3. Primary Highlight: Rafiq Al-Tariq Inter-Wilaya Ride Sharing (Internal View) */}
-                <button
-                  type="button"
-                  onClick={() => {
-                    setView('rides');
-                    setIsMobileSidebarOpen(false);
-                  }}
-                  className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-semibold transition-all cursor-pointer border ${
-                    view === 'rides'
-                      ? 'bg-[var(--green)]/20 border-[var(--green)] text-[var(--green)] font-bold shadow-xs'
-                      : 'text-[var(--ink)] hover:bg-[var(--bg)] border-[var(--green)]/30 bg-[var(--green)]/10'
-                  }`}
-                >
-                  <div className="flex items-center gap-2.5 min-w-0">
-                    <Car className="w-4 h-4 text-[var(--green)] shrink-0" />
-                    <span className="truncate font-bold">
-                      رفيق الطريق · مشاركة الرحلات
-                    </span>
-                  </div>
-                  <span className="text-[10px] font-mono tabular-nums text-[var(--green)] font-bold shrink-0">
-                    58 ولاية
-                  </span>
                 </button>
 
                 {/* Clean Essential Emergency Contact Shortcuts */}
@@ -4364,8 +4364,8 @@ export default function App() {
             type="button"
             onClick={() => setIsDownloadModalOpen(true)}
             className="download-button w-full flex items-center justify-center gap-2 py-2 px-3 rounded-xl border border-emerald-600/40 bg-[#176b52] hover:bg-[#125742] text-white text-xs font-bold cursor-pointer transition-all shadow-xs active:scale-[0.98]"
-            title={lang === 'ar' ? 'تنزيل التطبيق (Android APK & iOS)' : 'Download App'}
-            aria-label={lang === 'ar' ? 'تنزيل التطبيق' : 'Download App'}
+            title={lang === 'ar' ? 'تنزيل وتثبيت التطبيق على جهازك' : 'Install App'}
+            aria-label={lang === 'ar' ? 'تنزيل وتثبيت التطبيق' : 'Install App'}
           >
             <span className="text-sm">📲</span>
             <span className="font-bold">
@@ -5177,14 +5177,6 @@ export default function App() {
                                       </button>
                                       <button
                                         type="button"
-                                        onClick={(e) => handleExportSession(session, e)}
-                                        className="p-1.5 text-[var(--mute)] hover:text-[var(--ink)] hover:bg-[var(--card)] rounded-lg cursor-pointer"
-                                        title={t.exportSession}
-                                      >
-                                        <Download className="w-3.5 h-3.5" />
-                                      </button>
-                                      <button
-                                        type="button"
                                         onClick={(e) => handleDeleteSession(session.id, e)}
                                         className="p-1.5 text-[var(--mute)] hover:text-rose-500 hover:bg-rose-500/10 rounded-lg cursor-pointer"
                                         title={t.deleteSession}
@@ -5456,8 +5448,8 @@ export default function App() {
 
                                       <button
                                         type="button"
-                                        onClick={() => {
-                                          navigator.clipboard.writeText(m.code || '');
+                                        onClick={async () => {
+                                          await handleCopyText(m.id, m.code || '');
                                           setCopiedCodeMsgId(m.id);
                                           setTimeout(() => setCopiedCodeMsgId(null), 2000);
                                         }}
@@ -5591,65 +5583,42 @@ export default function App() {
                                     <span>{t.listen}</span>
                                   </button>
 
-                                  {/* Explicit Convert Answer to File Menu (PDF, DOCX, XLSX, PPTX, CSV, MD, HTML, TXT) */}
-                                  <ConvertMessageToFileMenu
-                                    messageTitle={m.userPromptText || 'وثيقة تيدكلت AI'}
-                                    messageContent={m.text}
-                                    conversationId={activeSessionId}
-                                    onFileGenerated={(fileInfo) => {
-                                      setMessages((prev) =>
-                                        prev.map((item) =>
-                                          item.id === m.id ? { ...item, generatedFile: fileInfo } : item
-                                        )
-                                      );
-                                    }}
-                                  />
+                                   {/* Convert Answer to File Menu: Only when user asks for research/document/file or for large research responses */}
+                                   {(() => {
+                                     const prompt = (m.userPromptText || '').toLowerCase();
+                                     const isExplicitFileRequest = /(بحث|أريد بحث|اكتب لي|تقرير|ملف|مستند|pdf|word|docx|excel|تصدير|تحويل|وثيقة|مقالة|دراسة|تلخيص|جدول|كتاب|بحث حول)/i.test(prompt);
+                                     const isLargeResearch = Boolean(m.text && m.text.length >= 450 && /#|\n- |\n\d+\. /.test(m.text));
+                                     const shouldShowConvert = Boolean(m.generatedFile || isExplicitFileRequest || isLargeResearch);
 
-                                  {/* Retry / Regenerate Answer Button */}
-                                  {m.userPromptText && (
-                                    <button
-                                      type="button"
-                                      onClick={() => handleSend(m.userPromptText)}
-                                      disabled={isSending}
-                                      className="px-2.5 py-1 rounded-xl bg-[var(--bg)] hover:bg-[var(--line)]/50 border border-[var(--line)] text-[var(--ink)] hover:text-[var(--green)] text-[11px] font-bold flex items-center gap-1.5 cursor-pointer transition-all disabled:opacity-50 whitespace-nowrap"
-                                      title="إعادة توليد الإجابة"
-                                    >
-                                      <RotateCcw className="w-3.5 h-3.5" />
-                                      <span>إعادة المحاولة</span>
-                                    </button>
-                                  )}
+                                     if (!shouldShowConvert) return null;
+                                     return (
+                                       <ConvertMessageToFileMenu
+                                         messageTitle={m.userPromptText || 'وثيقة تيدكلت AI'}
+                                         messageContent={m.text}
+                                         conversationId={activeSessionId}
+                                         onFileGenerated={(fileInfo) => {
+                                           setMessages((prev) =>
+                                             prev.map((item) =>
+                                               item.id === m.id ? { ...item, generatedFile: fileInfo } : item
+                                             )
+                                           );
+                                         }}
+                                       />
+                                     );
+                                   })()}
 
-                                  {/* Internal Map & Tasks action: accessible when visitor asks about maps/locations/tasks */}
-                                  {/(خريطة|خرائط|أين تقع|موقع|مهام الواحة|tasks|maps)/i.test(m.userPromptText || m.text) && (
-                                    <button
-                                      type="button"
-                                      onClick={() => setView('maps_tasks')}
-                                      className="px-2.5 py-1 rounded-xl bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 text-emerald-600 dark:text-emerald-400 text-[11px] font-bold flex items-center gap-1.5 cursor-pointer transition-all whitespace-nowrap shadow-2xs"
-                                      title="فتح الخريطة التفاعلية والمهام"
-                                    >
-                                      <Compass className="w-3.5 h-3.5 text-emerald-500" />
-                                      <span>🗺️ فتح الخريطة والمهام</span>
-                                    </button>
-                                  )}
-
-                                  {/* Suggest Correction Button: Restricted strictly to Admin (hidden from general public) */}
-                                  {isAdminLoggedIn && (
-                                    <button
-                                      onClick={() => {
-                                        if (correctionTargetId === m.id) {
-                                          setCorrectionTargetId(null);
-                                        } else {
-                                          setCorrectionTargetId(m.id);
-                                          setCorrectionText('');
-                                        }
-                                      }}
-                                      className="px-2.5 py-1 rounded-xl bg-[var(--bg)] hover:bg-[var(--line)]/50 border border-[var(--line)] text-[var(--mute)] hover:text-[var(--gold)] text-[11px] font-bold flex items-center gap-1.5 cursor-pointer transition-all whitespace-nowrap"
-                                      title={t.suggestCorrection}
-                                    >
-                                      <Edit3 className="w-3.5 h-3.5" />
-                                      <span>{t.suggestCorrection}</span>
-                                    </button>
-                                  )}
+                                   {/* Internal Map & Tasks action: accessible when visitor asks about maps/locations/tasks */}
+                                   {/(خريطة|خرائط|أين تقع|موقع|مهام الواحة|tasks|maps)/i.test(m.userPromptText || m.text) && (
+                                     <button
+                                       type="button"
+                                       onClick={() => setView('maps_tasks')}
+                                       className="px-2.5 py-1 rounded-xl bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 text-emerald-600 dark:text-emerald-400 text-[11px] font-bold flex items-center gap-1.5 cursor-pointer transition-all whitespace-nowrap shadow-2xs"
+                                       title="فتح الخريطة التفاعلية والمهام"
+                                     >
+                                       <Compass className="w-3.5 h-3.5 text-emerald-500" />
+                                       <span>🗺️ فتح الخريطة والمهام</span>
+                                     </button>
+                                   )}
                                 </div>
 
                                 {/* Response Rating Buttons */}
@@ -6109,17 +6078,44 @@ export default function App() {
                   </div>
                 )}
 
-                <div className="bg-[var(--card)] border border-[var(--line)] rounded-2xl sm:rounded-3xl shadow-lg focus-within:ring-2 focus-within:ring-[var(--green)]/40 focus-within:border-[var(--green)] transition-all p-2 sm:p-2.5 flex flex-col gap-1.5">
+                <div
+                  onClick={(e) => {
+                    const target = e.target as HTMLElement;
+                    if (!target.closest('button') && !target.closest('a') && !target.closest('input')) {
+                      textareaRef.current?.focus();
+                    }
+                  }}
+                  className="bg-[var(--card)] border border-[var(--line)] rounded-2xl sm:rounded-3xl shadow-lg focus-within:ring-2 focus-within:ring-[var(--green)]/40 focus-within:border-[var(--green)] transition-all p-2 sm:p-2.5 flex flex-col gap-1.5 cursor-text"
+                >
                   <textarea
                     ref={textareaRef}
                     value={inputText}
                     onChange={(e) => setInputText(e.target.value)}
+                    onFocus={() => {
+                      setTimeout(() => {
+                        chatEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+                      }, 150);
+                    }}
                     onKeyDown={(e) => {
+                      if (e.nativeEvent.isComposing || (e as any).keyCode === 229) return;
                       if (e.key === 'Enter' && !e.shiftKey) {
-                        e.preventDefault();
-                        handleSend();
+                        const isMobileTouch =
+                          window.innerWidth < 768 ||
+                          (typeof window.matchMedia === 'function' &&
+                            window.matchMedia('(pointer: coarse)').matches);
+                        if (!isMobileTouch) {
+                          e.preventDefault();
+                          handleSend();
+                        }
                       }
                     }}
+                    inputMode="text"
+                    enterKeyHint="send"
+                    autoComplete="on"
+                    autoCorrect="on"
+                    autoCapitalize="sentences"
+                    spellCheck={true}
+                    dir="auto"
                     placeholder={
                       selectedPdf
                         ? lang === 'ar'
@@ -6136,7 +6132,7 @@ export default function App() {
                         : t.inputPlaceholder
                     }
                     rows={1}
-                    className="w-full resize-none border-0 bg-transparent text-[var(--ink)] placeholder-[var(--mute)] text-sm focus:outline-none px-2 py-1 max-h-36 min-h-[38px] leading-relaxed"
+                    className="w-full resize-none border-0 bg-transparent text-[var(--ink)] placeholder-[var(--mute)] text-base sm:text-sm focus:outline-none px-2 py-1.5 max-h-36 min-h-[42px] leading-relaxed select-text touch-manipulation"
                   />
 
                   <div className="flex items-center justify-between pt-1 border-t border-[var(--line)]/50">
@@ -6747,8 +6743,8 @@ export default function App() {
                             {/* Copy Code */}
                             <button
                               type="button"
-                              onClick={() => {
-                                navigator.clipboard.writeText(activeCode);
+                              onClick={async () => {
+                                await handleCopyText(item.id, activeCode);
                                 setCopiedCodeMsgId(item.id);
                                 setTimeout(() => setCopiedCodeMsgId(null), 2000);
                               }}

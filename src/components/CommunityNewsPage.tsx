@@ -163,6 +163,42 @@ const createInitialPosts = (): MahaliyatPost[] => {
       source: '',
       comments: [],
     },
+    {
+      id: 6,
+      uid: 'u1',
+      cat: 'community',
+      place: 'أدرار',
+      ts: now - 14 * H,
+      likes: 18,
+      demo: true,
+      text: 'افتتاح موسم جني وتسويق التمور في واحات أدرار وتيميمون مع إقبال واسع على الأسواق الشعبية وتوفر أصناف عالية الجودة.',
+      source: 'شبكة فلاحي أدرار',
+      comments: ['سالم: نوعية ممتازة هذا العام والأسعار مشجعة.'],
+    },
+    {
+      id: 7,
+      uid: 'u3',
+      cat: 'services',
+      place: 'تمنراست',
+      ts: now - 28 * H,
+      likes: 22,
+      demo: true,
+      text: 'انطلاق معرض الحرف التقليدية وتجهيزات الطاقة الشمسية والري الفلاحي بمدينة تمنراست بمشاركة حرفيين من مختلف بلديات الولاية.',
+      source: 'غرفة الصناعة التقليدية تمنراست',
+      comments: ['أحمد: فرصة ممتازة للشباب والمزارعين.'],
+    },
+    {
+      id: 8,
+      uid: 'u2',
+      cat: 'services',
+      place: 'الجزائر العاصمة',
+      ts: now - 8 * H,
+      likes: 35,
+      demo: true,
+      text: 'توسيع خدمات الدفع الإلكتروني والبطاقة الذهبية عبر كافة المكاتب البريدية والمراكز الحضرية.',
+      source: 'بريد الجزائر',
+      comments: [],
+    },
   ];
 };
 
@@ -247,9 +283,7 @@ export const CommunityNewsPage: React.FC<CommunityNewsPageProps> = ({
     onConfirm: () => void;
   } | null>(null);
 
-  // Location & Toast
-  const [locName, setLocName] = useState<string>('');
-  const [isDetectingLoc, setIsDetectingLoc] = useState(false);
+  // News feed displays automatically from everywhere without manual selection
   const [toastMsg, setToastMsg] = useState<string | null>(null);
 
   const composerRef = useRef<HTMLElement | null>(null);
@@ -271,59 +305,7 @@ export const CommunityNewsPage: React.FC<CommunityNewsPageProps> = ({
   const getUser = (uid: string): MahaliyatUser =>
     users.find((u) => u.id === uid) || { id: uid, name: 'مستخدم' };
 
-  const detectLocation = (manual: boolean) => {
-    if (!manual) {
-      try {
-        const cached = JSON.parse(localStorage.getItem(LOCK) || 'null');
-        if (cached && Date.now() - cached.t < 864e5 && cached.v) {
-          setLocName(cached.v);
-          return;
-        }
-      } catch {
-        // ignore
-      }
-    }
-    if (!locName) {
-      setLocName(fallbackCountry());
-    }
-    if (!navigator.geolocation) {
-      if (manual) showToast('المتصفح لا يدعم تحديد الموقع');
-      return;
-    }
-    if (manual) setIsDetectingLoc(true);
-    navigator.geolocation.getCurrentPosition(
-      async (pos) => {
-        try {
-          const r = await fetch(
-            `https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${pos.coords.latitude}&longitude=${pos.coords.longitude}&localityLanguage=ar`
-          );
-          const d = await r.json();
-          const name = cleanName(
-            d.countryCode === 'DZ' ? d.principalSubdivision : d.countryName
-          );
-          if (!name) throw new Error('empty');
-          setLocName(name);
-          setIsDetectingLoc(false);
-          try {
-            localStorage.setItem(LOCK, JSON.stringify({ v: name, t: Date.now() }));
-          } catch {
-            // ignore
-          }
-        } catch {
-          setIsDetectingLoc(false);
-          if (manual) showToast('تعذّر معرفة موقعك، حاول لاحقًا');
-        }
-      },
-      () => {
-        setIsDetectingLoc(false);
-        if (manual) showToast('فعّل إذن الموقع من إعدادات المتصفح');
-      },
-      { timeout: 9000, maximumAge: 36e5 }
-    );
-  };
-
   useEffect(() => {
-    detectLocation(false);
     const handleOutsideClick = (e: MouseEvent) => {
       const target = e.target as HTMLElement | null;
       if (!target) return;
@@ -358,10 +340,9 @@ export const CommunityNewsPage: React.FC<CommunityNewsPageProps> = ({
 
   const openComposer = () => {
     setIsComposerOpen(true);
-    setTimeout(() => {
-      txtRef.current?.focus({ preventScroll: true });
-      composerRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    }, 30);
+    requestAnimationFrame(() => {
+      txtRef.current?.focus();
+    });
   };
 
   const handlePublish = async () => {
@@ -375,7 +356,7 @@ export const CommunityNewsPage: React.FC<CommunityNewsPageProps> = ({
       txtRef.current?.focus();
       return;
     }
-    const placeVal = composerPlace.trim() || locName;
+    const placeVal = composerPlace.trim() || 'عين صالح';
     const sourceVal = composerSource.trim();
     const newId = Date.now();
     const newPost: MahaliyatPost = {
@@ -582,6 +563,7 @@ export const CommunityNewsPage: React.FC<CommunityNewsPageProps> = ({
     .filter((p) => {
       if (!isPostVisible(p)) return false;
       if (selectedCat !== 'all' && p.cat !== selectedCat) return false;
+
       if (qLower) {
         const u = getUser(p.uid);
         const haystack = `${p.text} ${u.name} ${p.place} ${p.source || ''}`.toLowerCase();
@@ -744,20 +726,12 @@ export const CommunityNewsPage: React.FC<CommunityNewsPageProps> = ({
             </button>
             <div className="brand-info">
               <span className="brand-title">محليات</span>
-              <button
-                className="loc"
-                id="loc"
-                type="button"
-                aria-label="تحديث موقعي"
-                onClick={() => detectLocation(true)}
-              >
-                <svg className="i i-12" aria-hidden="true">
+              <span className="loc" id="loc" title="أخبار ومستجدات المجتمع المحلي">
+                <svg className="i i-12 text-[var(--green)]" aria-hidden="true">
                   <use href="#i-pin" />
                 </svg>
-                <span id="locT">
-                  {isDetectingLoc ? 'جارٍ التحديد…' : locName || 'حدد موقعك'}
-                </span>
-              </button>
+                <span id="locT" className="font-bold">كل الولايات</span>
+              </span>
             </div>
           </div>
 
@@ -818,8 +792,8 @@ export const CommunityNewsPage: React.FC<CommunityNewsPageProps> = ({
             <button
               type="button"
               className="ib"
-              aria-label="رفيق الطريق"
-              title="رفيق الطريق"
+              aria-label="كاش بلاصة معك (Kash Bilasa)"
+              title="كاش بلاصة معك (Kash Bilasa)"
               onClick={() => {
                 if (onOpenRafiq) onOpenRafiq();
               }}
@@ -868,9 +842,7 @@ export const CommunityNewsPage: React.FC<CommunityNewsPageProps> = ({
               type="button"
               onClick={openComposer}
             >
-              {locName
-                ? `شارك خبرًا مع أهل ${locName}`
-                : 'شارك خبرًا مع أهل منطقتك'}
+              شارك خبرًا أو إعلانًا مع المجتمع المحلي
             </button>
           </div>
           <div className="c-more">
@@ -1641,6 +1613,8 @@ export const CommunityNewsPage: React.FC<CommunityNewsPageProps> = ({
           </div>
         </div>
       )}
+
+
 
       {/* Floating Action Button */}
       <button
