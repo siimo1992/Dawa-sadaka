@@ -1476,7 +1476,10 @@ select,
   width: 100%;
   min-width: 0;
   height: 100%;
+  min-height: 0;
   flex: 1;
+  display: flex;
+  flex-direction: column;
   overflow-y: auto;
   overflow-x: hidden;
   position: relative;
@@ -1495,8 +1498,8 @@ select,
   --cmt-bg: rgba(28, 32, 29, 0.7);
   --pill-bg: rgba(255, 255, 255, 0.08);
   --pill-fg: #A59E8C;
-  --ink: var(--ink);
-  --muted: var(--mute);
+  --ink: #EFE9DB;
+  --muted: #A59E8C;
   --line: #3A413B;
   --green: #6FA593;
   --red: #E27B63;
@@ -1598,15 +1601,15 @@ select,
 }
 
 .mahaliyat-page .bar-in {
-  max-width: 680px;
+  max-width: 980px;
   width: 100%;
   margin: 0 auto;
-  min-height: 56px;
-  padding: 6px 12px;
+  min-height: 58px;
+  padding: 8px 16px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 6px;
+  gap: 8px;
 }
 
 .mahaliyat-page .brand {
@@ -1726,10 +1729,10 @@ select,
 
 .mahaliyat-page .searchrow {
   display: none;
-  max-width: 680px;
+  max-width: 980px;
   width: 100%;
   margin: 0 auto;
-  padding: 0 12px 10px;
+  padding: 0 16px 12px;
 }
 
 .mahaliyat-page .searchrow.open {
@@ -1763,15 +1766,22 @@ select,
 }
 
 .mahaliyat-page .mahaliyat-main {
-  max-width: 680px;
+  max-width: 980px;
   width: 100%;
   margin: 0 auto;
-  padding: 12px 12px 100px;
+  padding: 16px 16px 110px;
+  flex: 1;
 }
 
-@media (min-width: 480px) {
+@media (min-width: 640px) {
+  .mahaliyat-page .bar-in {
+    padding: 8px 24px;
+  }
+  .mahaliyat-page .searchrow {
+    padding: 0 24px 12px;
+  }
   .mahaliyat-page .mahaliyat-main {
-    padding: 14px 14px 100px;
+    padding: 20px 24px 110px;
   }
 }
 
@@ -2545,7 +2555,7 @@ select,
 
 .mahaliyat-page .fab {
   position: fixed;
-  inset-inline-start: 16px;
+  inset-inline-end: 20px;
   bottom: 20px;
   width: 52px;
   height: 52px;
@@ -2590,5 +2600,80 @@ select,
   }
 }
 
+/* =========================================================================
+   لوحة التحكم وبوابة المشرف — ضمان وضوح وتباين النص المدخل 100% ومنع أي تداخل طبقات أو ألوان
+   ========================================================================= */
+.admin-control-panel input:not([type="checkbox"]):not([type="radio"]):not([type="file"]),
+.admin-control-panel textarea,
+.admin-control-panel select,
+.admin-pin-modal input:not([type="checkbox"]):not([type="radio"]):not([type="file"]),
+.admin-input-field {
+  background-color: var(--bg) !important;
+  color: var(--ink) !important;
+  -webkit-text-fill-color: var(--ink) !important;
+  caret-color: var(--green) !important;
+  opacity: 1 !important;
+  position: relative;
+  z-index: 10;
+  font-weight: 700;
+  text-shadow: none !important;
+  filter: none !important;
+  mix-blend-mode: normal !important;
+}
 
+[data-theme="dark"] .admin-control-panel input:not([type="checkbox"]):not([type="radio"]):not([type="file"]),
+[data-theme="dark"] .admin-control-panel textarea,
+[data-theme="dark"] .admin-control-panel select,
+[data-theme="dark"] .admin-pin-modal input:not([type="checkbox"]):not([type="radio"]):not([type="file"]),
+[data-theme="dark"] .admin-input-field {
+  background-color: #1C201D !important;
+  color: #EFE9DB !important;
+  -webkit-text-fill-color: #EFE9DB !important;
+  caret-color: #6FA593 !important;
+}
 
+:root:not([data-theme="dark"]) .admin-control-panel input:not([type="checkbox"]):not([type="radio"]):not([type="file"]),
+:root:not([data-theme="dark"]) .admin-control-panel textarea,
+:root:not([data-theme="dark"]) .admin-control-panel select,
+:root:not([data-theme="dark"]) .admin-pin-modal input:not([type="checkbox"]):not([type="radio"]):not([type="file"]),
+:root:not([data-theme="dark"]) .admin-input-field {
+  background-color: #FFFFFF !important;
+  color: #1E2420 !important;
+  -webkit-text-fill-color: #1E2420 !important;
+  caret-color: #2F5D50 !important;
+}
+
+.admin-control-panel input::placeholder,
+.admin-control-panel textarea::placeholder,
+.admin-pin-modal input::placeholder,
+.admin-input-field::placeholder {
+  color: var(--mute) !important;
+  -webkit-text-fill-color: var(--mute) !important;
+  opacity: 0.72 !important;
+  font-weight: 500;
+}
+
+.admin-control-panel input:focus,
+.admin-control-panel textarea:focus,
+.admin-control-panel select:focus,
+.admin-pin-modal input:focus,
+.admin-input-field:focus {
+  outline: 2px solid var(--green) !important;
+  outline-offset: 0px;
+  z-index: 15;
+}
+
+.admin-control-panel input:-webkit-autofill,
+.admin-control-panel input:-webkit-autofill:hover,
+.admin-control-panel input:-webkit-autofill:focus,
+.admin-pin-modal input:-webkit-autofill,
+.admin-pin-modal input:-webkit-autofill:hover,
+.admin-pin-modal input:-webkit-autofill:focus,
+.admin-input-field:-webkit-autofill,
+.admin-input-field:-webkit-autofill:hover,
+.admin-input-field:-webkit-autofill:focus {
+  -webkit-box-shadow: 0 0 0 1000px var(--bg) inset !important;
+  -webkit-text-fill-color: var(--ink) !important;
+  caret-color: var(--green) !important;
+  transition: background-color 5000s ease-in-out 0s;
+}

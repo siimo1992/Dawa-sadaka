@@ -132,8 +132,6 @@ export const TrainingAndRagStudioModal: React.FC<TrainingAndRagStudioModalProps>
       ? agents
       : LOCALIZED_AGENTS[(lang === 'en' || lang === 'fr' ? lang : 'ar') as 'ar' | 'en' | 'fr'];
 
-  const ADMIN_HEADERS = { 'x-admin-token': '159159' };
-
   const showToast = (msg: string) => {
     setToastMessage(msg);
     setTimeout(() => setToastMessage(null), 3500);
@@ -150,8 +148,8 @@ export const TrainingAndRagStudioModal: React.FC<TrainingAndRagStudioModalProps>
     setLoading(true);
     try {
       const [sftRes, rlhfRes, ragRes, docsRes, avatarsRes] = await Promise.all([
-        fetch('/api/training/sft', { headers: ADMIN_HEADERS }).then((r) => r.json()),
-        fetch('/api/training/rlhf', { headers: ADMIN_HEADERS }).then((r) => r.json()),
+        fetch('/api/training/sft', { credentials: 'include' }).then((r) => r.json()),
+        fetch('/api/training/rlhf', { credentials: 'include' }).then((r) => r.json()),
         fetch('/api/rag/knowledge-base').then((r) => r.json()),
         fetch('/api/rag/documents')
           .then((r) => (r.ok ? r.json() : { documents: [] }))
@@ -206,14 +204,15 @@ export const TrainingAndRagStudioModal: React.FC<TrainingAndRagStudioModalProps>
       if (avatarDataUrl) {
         await fetch('/api/training/agent-avatars', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', ...ADMIN_HEADERS },
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
           body: JSON.stringify({ agentId, avatarUrl: avatarDataUrl }),
         });
         showToast('تم رفع وحفظ الصورة الرمزية المخصصة للوكيل بنجاح!');
       } else {
         await fetch(`/api/training/agent-avatars/${agentId}`, {
           method: 'DELETE',
-          headers: ADMIN_HEADERS,
+          credentials: 'include',
         });
         showToast('تمت استعادة الصورة الرمزية الافتراضية للوكيل.');
       }
@@ -285,7 +284,8 @@ export const TrainingAndRagStudioModal: React.FC<TrainingAndRagStudioModalProps>
     try {
       const res = await fetch('/api/training/sft', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...ADMIN_HEADERS },
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({
           query: newSftQuery,
           response: newSftResponse,
@@ -313,7 +313,7 @@ export const TrainingAndRagStudioModal: React.FC<TrainingAndRagStudioModalProps>
     try {
       await fetch(`/api/training/sft/${id}`, {
         method: 'DELETE',
-        headers: ADMIN_HEADERS,
+        credentials: 'include',
       });
       setSftDataset((prev) => prev.filter((item) => item.id !== id));
       showToast('تم حذف المثال من حزمة SFT.');
@@ -373,7 +373,8 @@ export const TrainingAndRagStudioModal: React.FC<TrainingAndRagStudioModalProps>
     try {
       const res = await fetch('/api/training/rlhf/vote', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...ADMIN_HEADERS },
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({
           prompt: arenaPrompt,
           responseA: arenaResponseA,
@@ -407,7 +408,8 @@ export const TrainingAndRagStudioModal: React.FC<TrainingAndRagStudioModalProps>
         .filter(Boolean);
       const res = await fetch('/api/rag/knowledge-base', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...ADMIN_HEADERS },
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({
           title: newDocTitle,
           content: newDocContent,
@@ -437,7 +439,7 @@ export const TrainingAndRagStudioModal: React.FC<TrainingAndRagStudioModalProps>
     try {
       await fetch(`/api/rag/knowledge-base/${id}`, {
         method: 'DELETE',
-        headers: ADMIN_HEADERS,
+        credentials: 'include',
       });
       setKnowledgeBase((prev) => prev.filter((k) => k.id !== id));
       showToast('تم حذف المقطع من قاعدة المعرفة.');
@@ -508,7 +510,8 @@ export const TrainingAndRagStudioModal: React.FC<TrainingAndRagStudioModalProps>
 
       const res = await fetch('/api/rag/upload-document', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...ADMIN_HEADERS },
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({
           fileName: detectedFileName,
           fileType: detectedFileType,
@@ -558,7 +561,7 @@ export const TrainingAndRagStudioModal: React.FC<TrainingAndRagStudioModalProps>
     try {
       const res = await fetch(`/api/rag/documents/${encodeURIComponent(docId)}`, {
         method: 'DELETE',
-        headers: ADMIN_HEADERS,
+        credentials: 'include',
       });
       const data = await res.json();
       if (data.success) {
@@ -606,7 +609,7 @@ export const TrainingAndRagStudioModal: React.FC<TrainingAndRagStudioModalProps>
   });
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 bg-black/60 backdrop-blur-sm animate-message-in">
+    <div className="admin-control-panel fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 bg-black/60 backdrop-blur-sm animate-message-in">
       <div className="bg-[var(--card)] border border-[var(--line)] rounded-3xl w-full max-w-4xl max-h-[92vh] flex flex-col shadow-2xl overflow-hidden">
         {/* Modal Header */}
         <div className="px-5 py-4 border-b border-[var(--line)] flex items-center justify-between shrink-0 bg-[var(--bg)]/50">

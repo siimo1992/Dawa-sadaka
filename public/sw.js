@@ -1,4 +1,4 @@
-const CACHE_NAME = 'tidikelt-ai-v5';
+const CACHE_NAME = 'tidikelt-ai-v2.6.0-sec';
 const OFFLINE_URL = '/offline.html';
 
 const PRECACHE_ASSETS = [

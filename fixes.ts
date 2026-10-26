@@ -22,28 +22,11 @@ try {
   // ignore if unsupported
 }
 
+import { requireAdmin as cookieRequireAdmin } from './src/server/adminAuth.ts';
+
 /* ───────────────────────── 1) حارس المشرف ───────────────────────── */
 
-function safeEqual(a: string, b: string): boolean {
-  const x = Buffer.from(a);
-  const y = Buffer.from(b);
-  return x.length === y.length && crypto.timingSafeEqual(x, y);
-}
-
-/** يفشل مغلقاً: إن لم يُضبط ADMIN_TOKEN يُعطَّل المسار الإداري بدل أن يُفتح للجميع. */
-export const requireAdmin: RequestHandler = (req, res, next) => {
-  const expected = process.env.ADMIN_TOKEN || '';
-  if (!expected) {
-    res.status(503).json({ error: 'ADMIN_TOKEN غير مضبوط على الخادم؛ المسار الإداري معطّل.' });
-    return;
-  }
-  const given = String(req.headers['x-admin-token'] || '');
-  if (!given || !safeEqual(given, expected)) {
-    res.status(401).json({ error: 'غير مصرّح.' });
-    return;
-  }
-  next();
-};
+export const requireAdmin: RequestHandler = cookieRequireAdmin;
 
 const ADMIN_ROUTES: Array<{ method: string; path: RegExp }> = [
   // تعديل الإعدادات والبيانات
@@ -57,11 +40,7 @@ const ADMIN_ROUTES: Array<{ method: string; path: RegExp }> = [
   { method: 'DELETE', path: /^\/api\/rag\/(knowledge-base|documents)\/.+$/ },
   { method: 'POST', path: /^\/api\/news\/local$/ },
   { method: 'DELETE', path: /^\/api\/news\/local\/[^/]+$/ },
-  // قراءة بيانات حساسة (نصوص أسئلة المستخدمين وتعليقاتهم)
-  { method: 'GET', path: /^\/api\/ain-salah\/stats$/ },
-  { method: 'GET', path: /^\/api\/ratings(\/stats)?$/ },
-  { method: 'GET', path: /^\/api\/training\/(sft|rlhf)$/ },
-  { method: 'GET', path: /^\/api\/companion\/admin\/.+$/ },
+  { method: 'POST', path: /^\/api\/community-news\/admin\/.+$/ },
 ];
 
 export const adminGate: RequestHandler = (req, res, next) => {

@@ -19,10 +19,13 @@ import {
   KeyRound,
   Check,
   X,
+  XCircle,
   Edit3,
   RefreshCw,
   Eye,
+  EyeOff,
   Sliders,
+  SlidersHorizontal,
   Sparkles,
   Wind,
   Flame,
@@ -125,6 +128,14 @@ import {
   ConvertMessageToFileMenu,
   type GeneratedFileInfo,
 } from './components/GeneratedFileCard';
+import {
+  PriceListPosterCard,
+  renderHighResPosterToJpeg,
+  applyPillowMarginsAndFooterToPage,
+  DEFAULT_PDF_EXPORT_SETTINGS,
+  type PriceListPosterData,
+  type PdfExportSettings,
+} from './components/PriceListPosterCard';
 
 interface Agent {
   id: string;
@@ -190,6 +201,7 @@ interface Message {
   isManualCodeCategory?: boolean;
   suggestedQuestions?: string[];
   generatedFile?: GeneratedFileInfo;
+  priceListPosters?: PriceListPosterData[];
 }
 
 function buildClientQuestionRefinements(rawPrompt: string, lang: Language): {
@@ -361,7 +373,7 @@ interface NewsItem {
   t: string; // text
   category?: string; // roads | health | services | education | weather | market | heritage | sports | tech | general
   timestamp: number;
-  status: 'approved' | 'pending';
+  status: 'approved' | 'pending' | 'rejected';
   authorName?: string;
   authorPhotoUrl?: string;
   neighborhood?: string;
@@ -713,8 +725,6 @@ const WEATHER_PRESETS = [
   },
 ];
 
-const ADMIN_PIN = '159159';
-const OWNER_AUTH_STORAGE_KEY = 'ain_salah_owner_auth_v2';
 const CHAT_SESSIONS_STORAGE_KEY = 'ai_studio_chat_sessions_v1';
 const ACTIVE_SESSION_STORAGE_KEY = 'ai_studio_active_session_id';
 
@@ -930,6 +940,29 @@ export default function App() {
   });
   // Active view mode per message ('tree' | 'text') for research mode outputs
   const [treeViewModeMap, setTreeViewModeMap] = useState<Record<string, 'tree' | 'text'>>({});
+  // Price List Poster Generator & 300 DPI PDF Compiler State inside Chat
+  const [selectedPostersForPdf, setSelectedPostersForPdf] = useState<Record<string, string>>({});
+  const [activeReferencePoster, setActiveReferencePoster] = useState<{
+    poster: PriceListPosterData;
+    jpegDataUrl: string;
+  } | null>(null);
+  const [isExportingPriceListPdf, setIsExportingPriceListPdf] = useState(false);
+  const [pdfExportSettings, setPdfExportSettings] = useState<PdfExportSettings>(() => {
+    try {
+      const saved = localStorage.getItem('tidikelt_pdf_export_settings');
+      if (saved) {
+        return { ...DEFAULT_PDF_EXPORT_SETTINGS, ...JSON.parse(saved) };
+      }
+    } catch {}
+    return DEFAULT_PDF_EXPORT_SETTINGS;
+  });
+
+  const handleUpdatePdfExportSettings = (next: PdfExportSettings) => {
+    setPdfExportSettings(next);
+    try {
+      localStorage.setItem('tidikelt_pdf_export_settings', JSON.stringify(next));
+    } catch {}
+  };
   const { isInstallable, isInstalled, isIOS, install: installPWA } = usePWAInstall();
   const isOnline = useOnlineStatus();
   const [showIOSInstallGuide, setShowIOSInstallGuide] = useState(false);
@@ -1290,23 +1323,118 @@ export default function App() {
     setTimeout(() => setCopiedMessageId(null), 2000);
   };
 
-  // Exclusive Owner Mode State (Protected strictly by ADMIN_PIN, hidden from all visitors)
+  // Exclusive Owner Mode State (Protected strictly by OWNER_PIN via HttpOnly Cookie + Session fallback)
+  const [adminSessionToken, setAdminSessionToken] = useState<string | null>(() => {
+    try {
+      return sessionStorage.getItem('tidikelt_admin_session');
+    } catch {
+      return null;
+    }
+  });
   const [isAdminLoggedIn, setIsAdminLoggedIn] = useState<boolean>(() => {
     try {
-      localStorage.removeItem('ain_salah_admin');
-      return localStorage.getItem(OWNER_AUTH_STORAGE_KEY) === 'verified_owner';
+      return !!sessionStorage.getItem('tidikelt_admin_session');
     } catch {
       return false;
     }
   });
+
+  useEffect(() => {
+    const token = sessionStorage.getItem('tidikelt_admin_session');
+    const headers: Record<string, string> = {};
+    if (token) {
+      headers['x-admin-session'] = token;
+      headers['authorization'] = `Bearer ${token}`;
+    }
+    fetch('/api/admin/check', { credentials: 'include', headers })
+      .then((r) => r.json())
+      .then((data) => {
+        if (data && data.loggedIn) {
+          setIsAdminLoggedIn(true);
+        } else {
+          setIsAdminLoggedIn(false);
+          sessionStorage.removeItem('tidikelt_admin_session');
+          setAdminSessionToken(null);
+        }
+      })
+      .catch(() => {
+        // If network glitch occurs, keep current state without forcing logout
+      });
+  }, []);
+
   const [showPinModal, setShowPinModal] = useState(false);
   const [pinInput, setPinInput] = useState('');
+  const [showPinText, setShowPinText] = useState(true);
   const [pinError, setPinError] = useState(false);
+  const [pinErrorMessage, setPinErrorMessage] = useState('');
   const [logoClickCount, setLogoClickCount] = useState(0);
-  const [adminTab, setAdminTab] = useState<'analytics' | 'ratings' | 'weather' | 'pending' | 'all' | 'fixes' | 'settings'>('analytics');
+  const [adminTab, setAdminTab] = useState<'news' | 'weather' | 'analytics' | 'ratings' | 'pin' | 'settings'>('news');
+  const [adminNewsStatusFilter, setAdminNewsStatusFilter] = useState<'all' | 'pending' | 'approved' | 'rejected'>('pending');
+  const [isAddingAdminNews, setIsAddingAdminNews] = useState(false);
+  const [adminNewSource, setAdminNewSource] = useState('');
+  const [adminNewText, setAdminNewText] = useState('');
+  const [adminNewCategory, setAdminNewCategory] = useState('general');
   const [analyticsData, setAnalyticsData] = useState<AnalyticsData | null>(null);
   const [isLoadingStats, setIsLoadingStats] = useState(false);
   const [statsNotification, setStatsNotification] = useState<string | null>(null);
+
+  // Admin PIN Change State
+  const [newPinValue, setNewPinValue] = useState('');
+  const [newPinConfirm, setNewPinConfirm] = useState('');
+  const [showNewPinText, setShowNewPinText] = useState(true);
+  const [isChangingPin, setIsChangingPin] = useState(false);
+  const [changePinToast, setChangePinToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+
+  const handleChangeAdminPin = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    const cleanPin = newPinValue.trim();
+    const cleanConfirm = newPinConfirm.trim();
+
+    if (!cleanPin) {
+      setChangePinToast({ type: 'error', message: 'يرجى كتابة رمز الدخول الجديد أولاً' });
+      return;
+    }
+    if (cleanPin.length < 4) {
+      setChangePinToast({ type: 'error', message: 'يجب أن يتكون الرمز السري من 4 خانات على الأقل' });
+      return;
+    }
+    if (cleanPin !== cleanConfirm) {
+      setChangePinToast({ type: 'error', message: 'الرمزان غير متطابقين، يرجى إعادة التأكيد بدقة' });
+      return;
+    }
+
+    setIsChangingPin(true);
+    setChangePinToast(null);
+
+    try {
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      const token = adminSessionToken || sessionStorage.getItem('tidikelt_admin_session');
+      if (token) {
+        headers['x-admin-session'] = token;
+        headers['authorization'] = `Bearer ${token}`;
+      }
+
+      const res = await fetch('/api/admin/change-pin', {
+        method: 'POST',
+        headers,
+        credentials: 'include',
+        body: JSON.stringify({ newPin: cleanPin }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.ok) {
+        setChangePinToast({ type: 'success', message: 'تم تغيير وحفظ رمز المشرف الجديد بنجاح في قاعدة البيانات ✨' });
+        setNewPinValue('');
+        setNewPinConfirm('');
+        setTimeout(() => setChangePinToast(null), 5000);
+      } else {
+        setChangePinToast({ type: 'error', message: data.message || 'تعذر حفظ الرمز، تحقق من صلاحيات المشرف.' });
+      }
+    } catch {
+      setChangePinToast({ type: 'error', message: 'تعذر الاتصال بالخادم لحفظ الرمز الجديد' });
+    } finally {
+      setIsChangingPin(false);
+    }
+  };
 
   // Response Rating & Quality Feedback State
   const [ratingPopoverMsgId, setRatingPopoverMsgId] = useState<string | null>(null);
@@ -1333,7 +1461,7 @@ export default function App() {
       try {
         await fetch(`/api/ratings/${msgId}`, {
           method: 'DELETE',
-          headers: { 'x-admin-token': ADMIN_PIN },
+          credentials: 'include',
         });
       } catch (err) {
         console.error('Failed to remove rating:', err);
@@ -1446,8 +1574,8 @@ export default function App() {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'x-admin-token': ADMIN_PIN,
         },
+        credentials: 'include',
       });
       if (res.ok) {
         setStatsNotification('تمت إعادة ضبط سجل تقييمات الجودة بنجاح ✨');
@@ -1466,7 +1594,7 @@ export default function App() {
     setIsLoadingStats(true);
     try {
       const res = await fetch('/api/ain-salah/stats', {
-        headers: { 'x-admin-token': ADMIN_PIN },
+        credentials: 'include',
       });
       if (res.ok) {
         const data = await res.json();
@@ -1487,8 +1615,8 @@ export default function App() {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'x-admin-token': ADMIN_PIN,
         },
+        credentials: 'include',
       });
       if (res.ok) {
         setStatsNotification('تمت إعادة ضبط وتحديث سجل البيانات الإحصائية بنجاح ✨');
@@ -1824,8 +1952,8 @@ export default function App() {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'x-admin-token': ADMIN_PIN,
         },
+        credentials: 'include',
         body: JSON.stringify({ notificationsPermanentlyDisabled: disabled }),
       });
     } catch (err) {
@@ -2827,19 +2955,44 @@ export default function App() {
     }
   };
 
-  const handleAdminLogin = (e?: React.FormEvent) => {
+  const handleAdminLogin = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
-    if (pinInput.trim() === ADMIN_PIN) {
-      setIsAdminLoggedIn(true);
-      localStorage.setItem(OWNER_AUTH_STORAGE_KEY, 'verified_owner');
-      setShowPinModal(false);
-      setPinInput('');
-      setPinError(false);
-      setView('admin');
-      setAdminTab('analytics');
-      fetchAnalytics();
-    } else {
+    const cleanPin = pinInput.trim();
+    if (!cleanPin) return;
+    try {
+      const res = await fetch('/api/admin/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ pin: cleanPin }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.ok) {
+        if (data.token) {
+          try {
+            sessionStorage.setItem('tidikelt_admin_session', data.token);
+          } catch {}
+          setAdminSessionToken(data.token);
+        }
+        setIsAdminLoggedIn(true);
+        setShowPinModal(false);
+        setPinInput('');
+        setPinError(false);
+        setPinErrorMessage('');
+        setView('admin');
+        setAdminTab('news');
+        fetchAnalytics();
+      } else {
+        setPinError(true);
+        if (res.status === 429 || data.error === 'rate_limited') {
+          setPinErrorMessage(data.message || 'تم تجاوز الحد المسموح للمحاولات مؤقتاً. يرجى الانتظار قليلاً.');
+        } else {
+          setPinErrorMessage(data.message || 'رمز المشرف غير صحيح. يرجى التأكد من الرمز والمحاولة ثانية.');
+        }
+      }
+    } catch {
       setPinError(true);
+      setPinErrorMessage('تعذر الاتصال بالخادم، يرجى إعادة المحاولة.');
     }
   };
 
@@ -2849,10 +3002,21 @@ export default function App() {
     }
   }, [view, adminTab]);
 
-  const handleAdminLogout = () => {
+  const handleAdminLogout = async () => {
+    try {
+      const headers: Record<string, string> = {};
+      const token = adminSessionToken || sessionStorage.getItem('tidikelt_admin_session');
+      if (token) {
+        headers['x-admin-session'] = token;
+        headers['authorization'] = `Bearer ${token}`;
+      }
+      await fetch('/api/admin/logout', { method: 'POST', headers, credentials: 'include' });
+    } catch {}
+    try {
+      sessionStorage.removeItem('tidikelt_admin_session');
+    } catch {}
+    setAdminSessionToken(null);
     setIsAdminLoggedIn(false);
-    localStorage.removeItem(OWNER_AUTH_STORAGE_KEY);
-    localStorage.removeItem('ain_salah_admin');
     setView('chat');
   };
 
@@ -2985,32 +3149,234 @@ export default function App() {
     });
   };
 
-  // Handle Send Message (includes stealth owner PIN interception, weatherAlert, image, and PDF analysis context)
+  // Toggle selection of a generated price list poster for multi-page 300 DPI PDF compilation
+  const handleToggleSelectPosterForPdf = (posterId: string, jpegDataUrl: string) => {
+    if (!jpegDataUrl) return;
+    setSelectedPostersForPdf((prev) => {
+      const next = { ...prev };
+      if (next[posterId]) {
+        delete next[posterId];
+      } else {
+        next[posterId] = jpegDataUrl;
+      }
+      return next;
+    });
+  };
+
+  // Stage 3: Compile all selected posters (or fallback poster) into a single 300 DPI PDF with Pillow Margins & Automatic Store Footer
+  const handleExportSelectedPostersToPdf = async (
+    fallbackSinglePosterJpeg?: string,
+    fallbackFilename: string = 'butcher_shop_price_lists.pdf',
+    targetMsgId?: string,
+    customSettingsOverride?: PdfExportSettings
+  ) => {
+    const selectedImages = Object.values(selectedPostersForPdf).filter(Boolean);
+    const rawImagesToCompile =
+      selectedImages.length > 0
+        ? selectedImages
+        : fallbackSinglePosterJpeg
+        ? [fallbackSinglePosterJpeg]
+        : [];
+
+    if (rawImagesToCompile.length === 0 || isExportingPriceListPdf) return;
+
+    const effectiveSettings = customSettingsOverride || pdfExportSettings;
+
+    setIsExportingPriceListPdf(true);
+    try {
+      // Apply Pillow-equivalent margins (ImageOps.expand) & automatic store/contact footer (ImageDraw) to each page
+      const compositedPages: string[] = [];
+      for (let i = 0; i < rawImagesToCompile.length; i++) {
+        const composited = await applyPillowMarginsAndFooterToPage(
+          rawImagesToCompile[i],
+          effectiveSettings,
+          i,
+          rawImagesToCompile.length
+        );
+        compositedPages.push(composited || rawImagesToCompile[i]);
+      }
+
+      const res = await fetch('/api/price-list/export-pdf', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          images: compositedPages,
+          filename: fallbackFilename,
+          pdfSettings: {
+            ...effectiveSettings,
+            alreadyCompositedOnClient: true,
+          },
+        }),
+      });
+      const data = await res.json();
+      if (res.ok && data.ok && data.file) {
+        // Trigger immediate browser download of the 300 DPI PDF
+        if (data.pdfBase64) {
+          const link = document.createElement('a');
+          link.href = data.pdfBase64;
+          link.download = data.file.filename || fallbackFilename;
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+        }
+
+        // Attach the verified GeneratedFileInfo card to the target message (or latest bot message)
+        setMessages((prev) => {
+          const targetId =
+            targetMsgId ||
+            [...prev].reverse().find((m) => m.role === 'bot' && m.priceListPosters?.length)?.id;
+          if (!targetId) return prev;
+          return prev.map((m) =>
+            m.id === targetId ? { ...m, generatedFile: data.file } : m
+          );
+        });
+      }
+    } catch (err) {
+      console.error('Failed to export price lists to PDF:', err);
+    } finally {
+      setIsExportingPriceListPdf(false);
+    }
+  };
+
+  // Run the complete 4-poster butcher shop sequential example + 300 DPI PDF export inside Chat
+  const handleRunFullButcherPriceListDemo = async () => {
+    if (isSending) return;
+    const demoUserMsg: Message = {
+      id: `msg-${Date.now()}`,
+      role: 'me',
+      text: 'توليد قوائم الأسعار الأربع المتناسقة للملحمة (لحم بقري، لحم الجمل، لحم غنمي، لحم الحاشي) وتصديرها إلى ملف PDF جاهز للطباعة (300 DPI)',
+      timestamp: Date.now(),
+    };
+    setMessages((prev) => [...prev, demoUserMsg]);
+    setIsSending(true);
+
+    try {
+      const steps = [
+        {
+          stage: 'base' as const,
+          filename: '01_beef_prices.jpg',
+          prompt: 'قائمة أسعار ملحمة لحم بقري: لحم بقري: 1800، صافي: 2200، داورة: 6000، كبدة: 3500',
+        },
+        {
+          stage: 'variation' as const,
+          filename: '02_camel_prices.jpg',
+          prompt: 'قائمة أسعار لحم الجمل بنفس التصميم: لحم الجمل: 1700، كبدة: 3500، هبرة: 2200، دوارة: 600',
+        },
+        {
+          stage: 'variation' as const,
+          filename: '03_lamb_prices.jpg',
+          prompt: 'قائمة أسعار لحم غنمي بنفس التصميم: لحم غنمي: 2500، دوارة: 800، كبدة + الشحمة: 3000',
+        },
+        {
+          stage: 'variation' as const,
+          filename: '04_young_camel_prices.jpg',
+          prompt: 'قائمة أسعار لحم الحاشي بنفس التصميم: لحم الحاشي: 1800، كبدة: 3500، دوارة: 6000، صافي: 2400',
+        },
+      ];
+
+      const generatedPosters: PriceListPosterData[] = [];
+      const jpegDataUrls: string[] = [];
+      let refBase64: string | undefined;
+      let refTheme: PriceListPosterData['theme'] | undefined;
+
+      for (const step of steps) {
+        const res = await fetch('/api/price-list/generate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            prompt: step.prompt,
+            stage: step.stage,
+            referenceImageBase64: refBase64,
+            previousTheme: refTheme,
+          }),
+        });
+        const data = await res.json();
+        if (res.ok && data.ok && data.poster) {
+          const posterObj: PriceListPosterData = {
+            ...data.poster,
+            filename: step.filename,
+          };
+          const renderedJpeg = await renderHighResPosterToJpeg(posterObj);
+          posterObj.renderedJpegDataUrl = renderedJpeg;
+          generatedPosters.push(posterObj);
+          jpegDataUrls.push(renderedJpeg);
+          refBase64 = renderedJpeg;
+          refTheme = posterObj.theme;
+        }
+      }
+
+      // Select all 4 generated posters automatically
+      const nextSelected: Record<string, string> = {};
+      generatedPosters.forEach((p, idx) => {
+        if (jpegDataUrls[idx]) {
+          nextSelected[p.id] = jpegDataUrls[idx];
+        }
+      });
+      setSelectedPostersForPdf((prev) => ({ ...prev, ...nextSelected }));
+
+      if (generatedPosters.length > 0) {
+        const lastIdx = generatedPosters.length - 1;
+        setActiveReferencePoster({
+          poster: generatedPosters[lastIdx],
+          jpegDataUrl: jpegDataUrls[lastIdx],
+        });
+      }
+
+      // Compile all 4 posters into butcher_shop_price_lists.pdf (300 DPI) with Pillow Margins & Automatic Store Footer
+      let compiledPdfFile: GeneratedFileInfo | undefined;
+      if (jpegDataUrls.length > 0) {
+        const compositedDemoPages: string[] = [];
+        for (let i = 0; i < jpegDataUrls.length; i++) {
+          const comp = await applyPillowMarginsAndFooterToPage(
+            jpegDataUrls[i],
+            pdfExportSettings,
+            i,
+            jpegDataUrls.length
+          );
+          compositedDemoPages.push(comp || jpegDataUrls[i]);
+        }
+
+        const pdfRes = await fetch('/api/price-list/export-pdf', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            images: compositedDemoPages,
+            filename: 'butcher_shop_price_lists.pdf',
+            pdfSettings: {
+              ...pdfExportSettings,
+              alreadyCompositedOnClient: true,
+            },
+          }),
+        });
+        const pdfData = await pdfRes.json();
+        if (pdfRes.ok && pdfData.ok && pdfData.file) {
+          compiledPdfFile = pdfData.file;
+        }
+      }
+
+      const botMsg: Message = {
+        id: `msg-${Date.now() + 1}`,
+        role: 'bot',
+        text:
+          `تم تنفيذ المراحل الثلاث بنجاح وتوليد **4 قوائم أسعار متناسقة بصرياً** (` +
+          `\`01_beef_prices.jpg\`، \`02_camel_prices.jpg\`، \`03_lamb_prices.jpg\`، \`04_young_camel_prices.jpg\`) ` +
+          `بنفس الهوية البصرية والإطار الذهبي، ودمجها في ملف **\`butcher_shop_price_lists.pdf\`** جاهز للطباعة بدقة **300 DPI** دون هوامش بيضاء.`,
+        priceListPosters: generatedPosters,
+        generatedFile: compiledPdfFile,
+        timestamp: Date.now(),
+        userPromptText: demoUserMsg.text,
+      };
+      setMessages((prev) => [...prev, botMsg]);
+    } catch (err) {
+      console.error('Error in full butcher demo:', err);
+    } finally {
+      setIsSending(false);
+    }
+  };
+
+  // Handle Send Message (includes weatherAlert, image, and PDF analysis context)
   const handleSend = async (queryText?: string) => {
     const q = (queryText || inputText).trim();
-
-    // Stealth Owner Access: Typing the exclusive owner PIN in chat opens the Owner Dashboard immediately without displaying or sending the PIN
-    if (q === ADMIN_PIN && !selectedImage && !selectedPdf) {
-      setInputText('');
-      if (isListening) {
-        try {
-          recognitionRef.current?.stop();
-        } catch {}
-        setIsListening(false);
-      }
-      if (textareaRef.current) {
-        textareaRef.current.style.height = 'auto';
-      }
-      setIsAdminLoggedIn(true);
-      localStorage.setItem(OWNER_AUTH_STORAGE_KEY, 'verified_owner');
-      setShowPinModal(false);
-      setPinInput('');
-      setPinError(false);
-      setView('admin');
-      setAdminTab('analytics');
-      fetchAnalytics();
-      return;
-    }
 
     if ((!q && !selectedImage && !selectedPdf && uploadedMultiFiles.length === 0) || isSending) return;
 
@@ -3150,6 +3516,93 @@ export default function App() {
                   : m
               )
             );
+            return;
+          }
+        }
+      }
+
+      // Automatic Detection for Store Price List Generation & Reference Variation inside Chat
+      const isBatchDemoPrompt =
+        /StorePriceListApp|01_beef_prices|butcher_shop_price_lists\.pdf/i.test(userMsg.text) ||
+        (/لحم بقري/.test(userMsg.text) &&
+          /لحم الجمل/.test(userMsg.text) &&
+          /لحم غنمي/.test(userMsg.text) &&
+          /لحم الحاشي/.test(userMsg.text));
+
+      const hasPriceListKeywords =
+        /قائمة\s*أسعار|قائمه\s*اسعار|قائمة\s*الاسعار|قائمة\s*الأسعار|لائحة\s*أسعار|جدول\s*أسعار|ملصق\s*أسعار|بوستر\s*أسعار|قوائم\s*الأسعار|قائمة\s*ثانية|قائمة\s*ثالثة|قائمة\s*رابعة|بنفس\s*التصميم|بنفس\s*الهوية/i.test(
+          userMsg.text
+        );
+
+      const pricePairsCount = (
+        userMsg.text.match(/[\u0600-\u06FFa-zA-Z\s+]{2,25}\s*[:：\-–—=]?\s*\d{2,6}/g) || []
+      ).length;
+
+      if (
+        !currentImage &&
+        !currentPdf &&
+        (isBatchDemoPrompt ||
+          hasPriceListKeywords ||
+          (activeReferencePoster && pricePairsCount >= 2 && /لحم|كبدة|دوارة|صافي|هبرة|قهوة|شاي|بيتزا|شاورما|سعر|أسعار|قائمة/i.test(userMsg.text)))
+      ) {
+        if (isBatchDemoPrompt) {
+          setIsSending(false);
+          // Remove the duplicate userMsg we just added and run the 4-poster batch flow directly
+          setMessages((prev) => prev.filter((m) => m.id !== userMsg.id));
+          await handleRunFullButcherPriceListDemo();
+          return;
+        }
+
+        const isVariation =
+          Boolean(activeReferencePoster) &&
+          (/بنفس\s*التصميم|بنفس\s*الهوية|نفس\s*التصميم|قائمة\s*ثانية|قائمة\s*ثالثة|قائمة\s*رابعة|مرجع/i.test(
+            userMsg.text
+          ) ||
+            !/تصميم\s*جديد\s*كلياً|بداية\s*جديدة/i.test(userMsg.text));
+
+        const plRes = await fetch('/api/price-list/generate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          signal: abortCtrl.signal,
+          body: JSON.stringify({
+            prompt: userMsg.text,
+            stage: isVariation ? 'variation' : 'base',
+            referencePosterId: isVariation ? activeReferencePoster?.poster.id : undefined,
+            referenceImageBase64: isVariation ? activeReferencePoster?.jpegDataUrl : undefined,
+            previousTheme: isVariation ? activeReferencePoster?.poster.theme : undefined,
+          }),
+        });
+
+        if (plRes.ok) {
+          const plData = await plRes.json();
+          if (plData.ok && plData.poster) {
+            const posterObj: PriceListPosterData = plData.poster;
+            const renderedJpeg = await renderHighResPosterToJpeg(posterObj);
+            posterObj.renderedJpegDataUrl = renderedJpeg;
+
+            setActiveReferencePoster({
+              poster: posterObj,
+              jpegDataUrl: renderedJpeg,
+            });
+            setSelectedPostersForPdf((prev) => ({
+              ...prev,
+              [posterObj.id]: renderedJpeg,
+            }));
+
+            const stageDesc =
+              posterObj.stage === 'base'
+                ? 'تم توليد **التصميم الأساسي المرجعي (المرحلة 1)** لقائمة الأسعار بدقة عالية وأبعاد `4:5`.'
+                : 'تم توليد **القائمة المتناسقة الجديدة (المرحلة 2)** بالاعتماد على الصورة المرجعية السابقة مع الحفاظ على تطابق الهوية البصرية والإطار الذهبي بنسبة 100%.';
+
+            const botMsg: Message = {
+              id: `msg-${Date.now() + 1}`,
+              role: 'bot',
+              text: `${stageDesc}\n\nيمكنك تحديد الصور المطلوبة والضغط على **تحويل الصور المختارة إلى PDF للطباعة (300 DPI)**، أو توليد قائمة أخرى بنفس الهوية البصرية:`,
+              priceListPosters: [posterObj],
+              timestamp: Date.now(),
+              userPromptText: userMsg.text,
+            };
+            setMessages((prev) => [...prev, botMsg]);
             return;
           }
         }
@@ -3443,13 +3896,18 @@ export default function App() {
     );
     playAlertChime('news', soundEnabled);
 
-    // Call server moderation review endpoint
+    // Call server moderation review endpoint with genuine admin session
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    const token = adminSessionToken || sessionStorage.getItem('tidikelt_admin_session');
+    if (token) {
+      headers['x-admin-session'] = token;
+      headers['authorization'] = `Bearer ${token}`;
+    }
+
     fetch(`/api/community-news/admin/${id}/review`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-user-role': 'owner',
-      },
+      headers,
+      credentials: 'include',
       body: JSON.stringify({ decision: 'publish', note: 'اعتماد ونشر من لوحة تحكم المشرف' }),
     }).catch((e) => console.warn('Could not sync approve to server:', e));
 
@@ -3504,16 +3962,41 @@ export default function App() {
   };
 
   const handleRejectNews = (id: string) => {
-    setNews((prev) => prev.filter((item) => item.id !== id));
-    // Call server moderation review endpoint
+    setNews((prev) =>
+      prev.map((item) => (item.id === id ? { ...item, status: 'rejected' } : item))
+    );
+
+    // Call server moderation review endpoint with genuine admin session
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    const token = adminSessionToken || sessionStorage.getItem('tidikelt_admin_session');
+    if (token) {
+      headers['x-admin-session'] = token;
+      headers['authorization'] = `Bearer ${token}`;
+    }
+
     fetch(`/api/community-news/admin/${id}/review`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-user-role': 'owner',
-      },
-      body: JSON.stringify({ decision: 'reject', note: 'رفض وحذف من لوحة تحكم المشرف' }),
+      headers,
+      credentials: 'include',
+      body: JSON.stringify({ decision: 'reject', note: 'رفض من لوحة تحكم المشرف' }),
     }).catch((e) => console.warn('Could not sync reject to server:', e));
+  };
+
+  const handleDeleteNews = (id: string) => {
+    if (!window.confirm('هل أنت متأكد من حذف هذا الخبر نهائياً من النظام؟')) return;
+    setNews((prev) => prev.filter((item) => item.id !== id));
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    const token = adminSessionToken || sessionStorage.getItem('tidikelt_admin_session');
+    if (token) {
+      headers['x-admin-session'] = token;
+      headers['authorization'] = `Bearer ${token}`;
+    }
+    fetch(`/api/community-news/admin/${id}/review`, {
+      method: 'POST',
+      headers,
+      credentials: 'include',
+      body: JSON.stringify({ decision: 'reject', note: 'حذف نهائي من لوحة المشرف' }),
+    }).catch(() => {});
   };
 
   const handleStartEditNews = (item: NewsItem) => {
@@ -3539,6 +4022,37 @@ export default function App() {
       )
     );
     setEditingNewsId(null);
+  };
+
+  const handleCreateAdminNews = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!adminNewText.trim() || !adminNewSource.trim()) return;
+
+    const newItem: NewsItem = {
+      id: `admin_news_${Date.now()}`,
+      s: adminNewSource.trim(),
+      t: adminNewText.trim(),
+      category: adminNewCategory || 'general',
+      timestamp: Date.now(),
+      status: 'approved',
+      isOfficial: true,
+      officialVerified: true,
+      likeCount: 0,
+      repostCount: 0,
+    };
+
+    setNews((prev) => [newItem, ...prev]);
+    setAdminNewText('');
+    setAdminNewSource('');
+    setIsAddingAdminNews(false);
+    playAlertChime('news', soundEnabled);
+    pushInAppNotification({
+      type: 'news',
+      title: `خبر رسمي جديد: ${newItem.s}`,
+      message: newItem.t,
+      category: newItem.category,
+      isVerified: true,
+    });
   };
 
   // Purge ALL news
@@ -3715,6 +4229,7 @@ export default function App() {
   // Filtered lists
   const pendingNews = news.filter((n) => n.status === 'pending');
   const approvedNews = news.filter((n) => n.status === 'approved' || !n.status);
+  const rejectedNews = news.filter((n) => n.status === 'rejected');
 
   // Weather Banner Color Styles
   const getAlertStyle = (severity: 'danger' | 'warning' | 'info') => {
@@ -3780,75 +4295,7 @@ export default function App() {
         </div>
       )}
 
-      {/* PIN Authentication Modal */}
-      {showPinModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in">
-          <div className="bg-[var(--card)] border border-[var(--line)] rounded-3xl p-5 max-w-sm w-full space-y-4 shadow-2xl">
-            <div className="flex items-center justify-between border-b border-[var(--line)] pb-3">
-              <div className="flex items-center gap-2 text-[var(--green)]">
-                <ShieldAlert className="w-5 h-5 text-[var(--gold)]" />
-                <b className="text-base text-[var(--ink)]">{t.adminTitle}</b>
-              </div>
-              <button
-                onClick={() => {
-                  setShowPinModal(false);
-                  setPinInput('');
-                  setPinError(false);
-                }}
-                className="p-1 rounded-lg text-[var(--mute)] hover:text-[var(--ink)]"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            <p className="text-xs text-[var(--mute)] leading-relaxed m-0">
-              {t.adminSubtitle}
-            </p>
-
-            <form onSubmit={handleAdminLogin} className="space-y-3">
-              <div>
-                <label className="text-xs font-semibold text-[var(--ink)] block mb-1">
-                  {t.adminPinPrompt}
-                </label>
-                <input
-                  type="password"
-                  inputMode="numeric"
-                  autoComplete="off"
-                  autoFocus
-                  value={pinInput}
-                  onChange={(e) => {
-                    setPinInput(e.target.value);
-                    setPinError(false);
-                  }}
-                  placeholder={t.pinPlaceholder}
-                  className="w-full border border-[var(--line)] bg-[var(--bg)] text-[var(--ink)] rounded-xl px-3.5 py-2.5 text-sm focus:outline-none focus:border-[var(--green)] font-mono tabular-nums tracking-widest text-center"
-                />
-                {pinError && (
-                  <p className="text-[11px] text-[var(--bad)] font-semibold mt-1 mb-0">
-                    {t.adminPinError}
-                  </p>
-                )}
-              </div>
-
-              <div className="flex items-center gap-2 pt-1">
-                <button
-                  type="submit"
-                  className="flex-1 bg-[var(--green)] text-[var(--on)] rounded-xl py-2.5 text-xs font-bold shadow-sm cursor-pointer"
-                >
-                  {t.enterDashboard}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setShowPinModal(false)}
-                  className="px-3 py-2.5 rounded-xl border border-[var(--line)] text-xs text-[var(--mute)] hover:text-[var(--ink)]"
-                >
-                  {t.cancel}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+      {/* PIN Authentication Modal is rendered once at the root level with .admin-pin-modal */}
 
       {/* Mobile Drawer Overlay */}
       {isMobileSidebarOpen && !isMindFocusMode && (
@@ -3978,9 +4425,92 @@ export default function App() {
 
         {/* Sidebar Scrollable & Resizable Body: Views & Navigation */}
         <div className="flex-1 min-h-0 overflow-hidden p-3 flex flex-col gap-1.5 transition-all duration-200">
-          {/* Archived Chat Sessions Section — Expanded Space for Conversations at Top */}
-          <div className="flex-1 min-h-0 flex flex-col">
-            <div className="flex items-center justify-between px-2 mb-2 shrink-0">
+          {/* 1. Featured Navigation Views (Moved to Top) */}
+          <div className="shrink-0 pb-1 transition-all duration-200">
+            <div className="flex items-center justify-between px-1.5 mb-1.5 gap-1">
+              <span className="text-[10px] uppercase font-bold text-[var(--mute)] tracking-wider truncate">
+                {t.sectionsAndServices}
+              </span>
+            </div>
+
+            <div className="space-y-1">
+              {/* 1. Kash Bilasa Inter-Wilaya Ride Sharing */}
+              <button
+                type="button"
+                onClick={() => {
+                  setView('rides');
+                  setIsMobileSidebarOpen(false);
+                }}
+                className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-xl text-xs font-semibold transition-all cursor-pointer border ${
+                  view === 'rides'
+                    ? 'bg-[var(--green)]/20 border-[var(--green)] text-[var(--green)] font-bold shadow-xs'
+                    : 'text-[var(--ink)] hover:bg-[var(--bg)] border-[var(--green)]/30 bg-[var(--green)]/10'
+                }`}
+              >
+                <div className="flex items-center gap-2 min-w-0">
+                  <Car className="w-3.5 h-3.5 text-[var(--green)] shrink-0" />
+                  <span className="truncate font-bold text-[11.5px]">
+                    {lang === 'ar' ? 'كاش بلاصة معك · رحلات' : 'Kash Bilasa · Rides'}
+                  </span>
+                </div>
+                <span className="text-[9.5px] font-mono tabular-nums text-[var(--green)] font-bold shrink-0">
+                  58 ولاية
+                </span>
+              </button>
+
+              {/* 2. Smart Chat */}
+              <button
+                onClick={() => {
+                  setView('chat');
+                  setIsMobileSidebarOpen(false);
+                }}
+                className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
+                  view === 'chat'
+                    ? 'bg-[var(--green)]/15 text-[var(--green)] font-bold'
+                    : 'text-[var(--ink)] hover:bg-[var(--bg)]'
+                }`}
+              >
+                <div className="flex items-center gap-2 min-w-0">
+                  <MessageSquare className="w-3.5 h-3.5 shrink-0" />
+                  <span className="truncate text-[11.5px]">{t.smartChat}</span>
+                </div>
+                {messages.length > 0 && (
+                  <span className="text-[9.5px] opacity-75 font-mono px-1.5 py-0.5 rounded-full bg-black/5 dark:bg-white/10 shrink-0">
+                    {messages.length}
+                  </span>
+                )}
+              </button>
+
+              {/* 3. Local News */}
+              <button
+                onClick={() => {
+                  setView('news');
+                  setIsMobileSidebarOpen(false);
+                }}
+                className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
+                  view === 'news'
+                    ? 'bg-[var(--green)]/15 text-[var(--green)] font-bold'
+                    : 'text-[var(--ink)] hover:bg-[var(--bg)]'
+                }`}
+              >
+                <div className="flex items-center gap-2 min-w-0">
+                  <span className="shrink-0 text-xs">📰</span>
+                  <span className="truncate text-[11.5px]">
+                    {lang === 'ar' ? 'كاش ما تعرف · محليات' : t.localNews}
+                  </span>
+                </div>
+                {approvedNews.length > 0 && (
+                  <span className="text-[9.5px] font-bold px-1.5 py-0.5 rounded-full bg-[var(--green)]/20 text-[var(--green)] shrink-0">
+                    {approvedNews.length}
+                  </span>
+                )}
+              </button>
+            </div>
+          </div>
+
+          {/* 2. Archived Chat Sessions Section (Placed Below Sections & Services as requested) */}
+          <div className="flex-1 min-h-0 flex flex-col pt-1.5 border-t border-[var(--line)]/60">
+            <div className="flex items-center justify-between px-2 mb-1.5 shrink-0">
               <span className="text-[10px] uppercase font-bold text-[var(--mute)] tracking-wider flex items-center gap-1.5">
                 <History className="w-3.5 h-3.5 text-[var(--mute)]" />
                 <span>{t.archivedSessions}</span>
@@ -3993,7 +4523,7 @@ export default function App() {
             </div>
 
             {chatSessions.length === 0 ? (
-              <div className="px-2.5 py-3 text-center border border-dashed border-[var(--line)]/60 rounded-xl my-1 bg-[var(--bg)]/30">
+              <div className="px-2.5 py-2.5 text-center border border-dashed border-[var(--line)]/60 rounded-xl my-1 bg-[var(--bg)]/30">
                 <p className="text-[10px] text-[var(--mute)] leading-relaxed m-0">{t.noArchivedSessions}</p>
               </div>
             ) : (
@@ -4058,7 +4588,6 @@ export default function App() {
 
                           {/* Right Side: Message Count / Time or Actions Trigger on Hover */}
                           <div className="flex items-center gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
-                            {/* Compact message count badge shown when not hovering menu */}
                             {openSessionMenuId !== session.id && (
                               <span className="text-[9.5px] font-mono text-[var(--mute)] opacity-60 group-hover:hidden px-1">
                                 {session.messages?.length || 0}
@@ -4123,283 +4652,95 @@ export default function App() {
             )}
           </div>
 
-          {/* Interactive Vertical Resizer Bar between Conversations and Sections */}
-          <span
-            role="separator"
-            aria-orientation="horizontal"
-            onMouseDown={(e) => {
-              e.preventDefault();
-              setIsResizingSidebarSplit(true);
-            }}
-            onClick={() => setIsSidebarNavCompact((prev) => !prev)}
-            title="اسحب للأعلى أو الأسفل (أو اضغط) لتمديد أو تقصير مساحة الأقسام والمحادثات"
-            className={`shrink-0 py-1 flex items-center justify-center cursor-ns-resize group select-none`}
-          >
-            <span
-              className={`h-1 w-10 rounded-full transition-all ${
-                isResizingSidebarSplit
-                  ? 'bg-[var(--green)] w-14'
-                  : 'bg-[var(--line)] group-hover:bg-[var(--green)]/70 group-hover:w-12'
-              }`}
-            />
-          </span>
-
-          {/* Featured Navigation Views (Placed at the bottom) */}
-          <div
-            className={`shrink-0 overflow-y-auto transition-all duration-200 pr-0.5 pt-1.5 border-t border-[var(--line)]/50 ${
-              isSidebarNavCompact
-                ? 'max-h-24'
-                : navSectionHeightStep === 1
-                ? 'max-h-44'
-                : navSectionHeightStep === 2
-                ? 'max-h-72'
-                : 'max-h-[420px]'
-            }`}
-          >
-            <div className="flex items-center justify-between px-1.5 mb-1.5 gap-1">
-              <span className="text-[10px] uppercase font-bold text-[var(--mute)] tracking-wider truncate">
-                {t.sectionsAndServices}
+          {/* 3. Dedicated Independent Emergency & Rapid Rescue Section — Compact & Neutral (بدون ألوان) */}
+          <div className="shrink-0 py-1 px-2 border-t border-[var(--line)]/50 bg-transparent rounded-xl mt-0.5">
+            <div className="flex items-center justify-between px-0.5 mb-1">
+              <span className="text-[9.5px] uppercase font-bold text-[var(--mute)] tracking-wider flex items-center gap-1">
+                <span>{t.quickEmergency}</span>
               </span>
-
-              {/* Quick Stretch / Shrink Controls for the Sidebar & Sections */}
-              <div className="flex items-center gap-1 shrink-0">
-                <button
-                  type="button"
-                  onClick={() => setIsSidebarNavCompact((prev) => !prev)}
-                  className="px-1.5 py-0.5 rounded-md bg-[var(--bg)] hover:bg-[var(--green)]/15 border border-[var(--line)] text-[9px] font-bold text-[var(--mute)] hover:text-[var(--green)] transition-colors cursor-pointer flex items-center gap-0.5"
-                  title={
-                    isSidebarNavCompact
-                      ? 'تمديد شريط الأقسام عمودياً'
-                      : 'تقصير شريط الأقسام لتوسيع المحادثات'
-                  }
-                >
-                  {isSidebarNavCompact ? (
-                    <>
-                      <ChevronDown className="w-3 h-3" />
-                      <span>تمديد</span>
-                    </>
-                  ) : (
-                    <>
-                      <ChevronUp className="w-3 h-3" />
-                      <span>تقصير</span>
-                    </>
-                  )}
-                </button>
-
-              </div>
+              <span className="text-[8.5px] font-mono text-[var(--mute)] font-semibold">24/24h</span>
             </div>
 
-            {isSidebarNavCompact ? (
-              /* Compact Single-Row Bar Mode: Rafiq/Kash Bilasa first, then Chat, News */
-              <div className="grid grid-cols-3 gap-1">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setView('rides');
-                    setIsMobileSidebarOpen(false);
-                  }}
-                  title={lang === 'ar' ? 'كاش بلاصة معك (Kash Bilasa) — مشاركة الرحلات بين الولايات' : 'Kash Bilasa — Inter-Wilaya Ride Sharing'}
-                  className={`flex items-center justify-center gap-1 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer border ${
-                    view === 'rides'
-                      ? 'bg-[var(--green)]/20 border-[var(--green)]/40 text-[var(--green)]'
-                      : 'bg-[var(--bg)]/60 border-[var(--line)] text-[var(--ink)] hover:bg-[var(--bg)]'
-                  }`}
-                >
-                  <Car className="w-3.5 h-3.5" />
-                  <span>{lang === 'ar' ? 'كاش بلاصة معك' : 'Kash Bilasa'}</span>
-                </button>
+            <div className="grid grid-cols-4 gap-1">
+              <a
+                href="tel:14"
+                className="py-1 px-0.5 rounded-lg bg-[var(--bg)] hover:bg-[var(--line)]/40 text-[var(--ink)] border border-[var(--line)] text-[10px] font-bold text-center transition-colors"
+                title="الحماية المدنية - 14"
+              >
+                14
+              </a>
 
-                <button
-                  type="button"
-                  onClick={() => {
-                    setView('chat');
-                    setIsMobileSidebarOpen(false);
-                  }}
-                  title={t.smartChat}
-                  className={`flex items-center justify-center gap-1 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer border ${
-                    view === 'chat'
-                      ? 'bg-[var(--green)]/15 border-[var(--green)]/40 text-[var(--green)]'
-                      : 'bg-[var(--bg)]/60 border-[var(--line)] text-[var(--ink)] hover:bg-[var(--bg)]'
-                  }`}
-                >
-                  <MessageSquare className="w-3.5 h-3.5" />
-                  <span>المحادثة</span>
-                </button>
+              <a
+                href="tel:1055"
+                className="py-1 px-0.5 rounded-lg bg-[var(--bg)] hover:bg-[var(--line)]/40 text-[var(--ink)] border border-[var(--line)] text-[10px] font-bold text-center transition-colors"
+                title="الدرك الوطني - 1055"
+              >
+                1055
+              </a>
 
-                <button
-                  type="button"
-                  onClick={() => {
-                    setView('news');
-                    setIsMobileSidebarOpen(false);
-                  }}
-                  title={t.localNews}
-                  className={`flex items-center justify-center gap-1 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer border ${
-                    view === 'news'
-                      ? 'bg-[var(--green)]/15 border-[var(--green)]/40 text-[var(--green)]'
-                      : 'bg-[var(--bg)]/60 border-[var(--line)] text-[var(--ink)] hover:bg-[var(--bg)]'
-                  }`}
-                >
-                  <span className="text-xs leading-none">📰</span>
-                  <span>الأخبار</span>
-                </button>
-              </div>
-            ) : (
-              <div className="space-y-1.5">
-                {/* 1. Top Highlight: Kash Bilasa Inter-Wilaya Ride Sharing (Moved to Top) */}
-                <button
-                  type="button"
-                  onClick={() => {
-                    setView('rides');
-                    setIsMobileSidebarOpen(false);
-                  }}
-                  className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-semibold transition-all cursor-pointer border ${
-                    view === 'rides'
-                      ? 'bg-[var(--green)]/20 border-[var(--green)] text-[var(--green)] font-bold shadow-xs'
-                      : 'text-[var(--ink)] hover:bg-[var(--bg)] border-[var(--green)]/30 bg-[var(--green)]/10'
-                  }`}
-                >
-                  <div className="flex items-center gap-2.5 min-w-0">
-                    <Car className="w-4 h-4 text-[var(--green)] shrink-0" />
-                    <span className="truncate font-bold">
-                      {lang === 'ar' ? 'كاش بلاصة معك · مشاركة الرحلات' : 'Kash Bilasa · Ride Sharing'}
-                    </span>
-                  </div>
-                  <span className="text-[10px] font-mono tabular-nums text-[var(--green)] font-bold shrink-0">
-                    58 ولاية
-                  </span>
-                </button>
+              <a
+                href="tel:17"
+                className="py-1 px-0.5 rounded-lg bg-[var(--bg)] hover:bg-[var(--line)]/40 text-[var(--ink)] border border-[var(--line)] text-[10px] font-bold text-center transition-colors"
+                title="شرطة النجدة - 17"
+              >
+                17
+              </a>
 
-                {/* 2. Highlight: Smart Chat */}
-                <button
-                  onClick={() => {
-                    setView('chat');
-                    setIsMobileSidebarOpen(false);
-                  }}
-                  className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
-                    view === 'chat'
-                      ? 'bg-[var(--green)]/15 text-[var(--green)] font-bold'
-                      : 'text-[var(--ink)] hover:bg-[var(--bg)]'
-                  }`}
-                >
-                  <div className="flex items-center gap-2.5 min-w-0">
-                    <MessageSquare className="w-4 h-4 shrink-0" />
-                    <span className="truncate">{t.smartChat}</span>
-                  </div>
-                  {messages.length > 0 && (
-                    <span className="text-[10px] opacity-75 font-mono px-1.5 py-0.5 rounded-full bg-black/5 dark:bg-white/10 shrink-0">
-                      {messages.length}
-                    </span>
-                  )}
-                </button>
-
-                {/* 3. Highlight: Local News */}
-                <button
-                  onClick={() => {
-                    setView('news');
-                    setIsMobileSidebarOpen(false);
-                  }}
-                  className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
-                    view === 'news'
-                      ? 'bg-[var(--green)]/15 text-[var(--green)] font-bold'
-                      : 'text-[var(--ink)] hover:bg-[var(--bg)]'
-                  }`}
-                >
-                  <div className="flex items-center gap-2.5 min-w-0">
-                    <span className="shrink-0">📰</span>
-                    <span className="truncate">{t.localNews}</span>
-                  </div>
-                  {approvedNews.length > 0 && (
-                    <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-[var(--green)]/20 text-[var(--green)] shrink-0">
-                      {approvedNews.length}
-                    </span>
-                  )}
-                </button>
-
-                {/* Clean Essential Emergency Contact Shortcuts */}
-                <div className="pt-2 border-t border-[var(--line)]/50">
-                  <span className="text-[10px] font-semibold text-[var(--mute)] px-1 mb-1 block">
-                    {t.quickEmergency}
-                  </span>
-                  <div className="grid grid-cols-4 gap-1">
-                    <a
-                      href="tel:14"
-                      className="flex items-center justify-center py-1 rounded-lg bg-[var(--bg)] hover:bg-rose-500/10 hover:text-rose-500 text-[var(--mute)] border border-[var(--line)] text-[10px] font-semibold transition-colors"
-                      title="الحماية المدنية 14"
-                    >
-                      14
-                    </a>
-                    <a
-                      href="tel:1055"
-                      className="flex items-center justify-center py-1 rounded-lg bg-[var(--bg)] hover:bg-emerald-500/10 hover:text-emerald-500 text-[var(--mute)] border border-[var(--line)] text-[10px] font-semibold transition-colors"
-                      title="الدرك الوطني 1055"
-                    >
-                      1055
-                    </a>
-                    <a
-                      href="tel:17"
-                      className="flex items-center justify-center py-1 rounded-lg bg-[var(--bg)] hover:bg-blue-500/10 hover:text-blue-500 text-[var(--mute)] border border-[var(--line)] text-[10px] font-semibold transition-colors"
-                      title="شرطة النجدة 17"
-                    >
-                      17
-                    </a>
-                    <a
-                      href="tel:1548"
-                      className="flex items-center justify-center py-1 rounded-lg bg-[var(--bg)] hover:bg-purple-500/10 hover:text-purple-500 text-[var(--mute)] border border-[var(--line)] text-[10px] font-semibold transition-colors"
-                      title="الأمن الوطني الأخضر 1548"
-                    >
-                      1548
-                    </a>
-                  </div>
-                </div>
-              </div>
-            )}
+              <a
+                href="tel:1548"
+                className="py-1 px-0.5 rounded-lg bg-[var(--bg)] hover:bg-[var(--line)]/40 text-[var(--ink)] border border-[var(--line)] text-[10px] font-bold text-center transition-colors"
+                title="الرقم الأخضر - 1548"
+              >
+                1548
+              </a>
+            </div>
           </div>
         </div>
 
-        {/* Sidebar Footer */}
-        <div className="p-2.5 border-t border-[var(--line)] flex flex-col gap-2">
-          {/* Download App Button - Placed at the bottom, directly above sound and sync */}
+        {/* Sidebar Footer — Compact & Slim */}
+        <div className="px-2 py-1.5 border-t border-[var(--line)] flex flex-col gap-1.5">
+          {/* Download App Button - Compact */}
           <button
             id="openDownload"
             type="button"
             onClick={() => setIsDownloadModalOpen(true)}
-            className="download-button w-full flex items-center justify-center gap-2 py-2 px-3 rounded-xl border border-emerald-600/40 bg-[#176b52] hover:bg-[#125742] text-white text-xs font-bold cursor-pointer transition-all shadow-xs active:scale-[0.98]"
+            className="download-button w-full flex items-center justify-center gap-1.5 py-1.5 px-2.5 rounded-lg border border-emerald-600/40 bg-[#176b52] hover:bg-[#125742] text-white text-[11px] font-bold cursor-pointer transition-all shadow-xs active:scale-[0.98]"
             title={lang === 'ar' ? 'تنزيل وتثبيت التطبيق على جهازك' : 'Install App'}
             aria-label={lang === 'ar' ? 'تنزيل وتثبيت التطبيق' : 'Install App'}
           >
-            <span className="text-sm">📲</span>
+            <span className="text-xs">📲</span>
             <span className="font-bold">
               {lang === 'ar' ? 'تنزيل التطبيق' : lang === 'fr' ? "Télécharger l'application" : 'Download App'}
             </span>
           </button>
 
           {/* Controls Row: Theme, Sound, Cloud Sync, and App Badge */}
-          <div className="flex items-center justify-between gap-1.5">
-            <div className="flex items-center gap-1.5">
+          <div className="flex items-center justify-between gap-1">
+            <div className="flex items-center gap-1">
               <button
                 onClick={toggleTheme}
-                className="p-1.5 rounded-xl text-[var(--mute)] hover:text-[var(--ink)] hover:bg-[var(--bg)] border border-[var(--line)] cursor-pointer transition-colors"
+                className="p-1 rounded-lg text-[var(--mute)] hover:text-[var(--ink)] hover:bg-[var(--bg)] border border-[var(--line)] cursor-pointer transition-colors"
                 title={t.toggleTheme}
               >
-                {theme === 'dark' ? <Sun className="w-3.5 h-3.5 text-[var(--gold)]" /> : <Moon className="w-3.5 h-3.5" />}
+                {theme === 'dark' ? <Sun className="w-3 h-3 text-[var(--gold)]" /> : <Moon className="w-3 h-3" />}
               </button>
 
               <button
                 onClick={toggleSound}
-                className={`p-1.5 rounded-xl border border-[var(--line)] cursor-pointer transition-colors ${
+                className={`p-1 rounded-lg border border-[var(--line)] cursor-pointer transition-colors ${
                   soundEnabled
                     ? 'text-[var(--green)] bg-[var(--green)]/10 font-bold'
                     : 'text-[var(--mute)] hover:text-[var(--ink)] hover:bg-[var(--bg)]'
                 }`}
                 title={soundEnabled ? t.soundEnabledTooltip : t.soundDisabledTooltip}
               >
-                {soundEnabled ? <Volume2 className="w-3.5 h-3.5" /> : <VolumeX className="w-3.5 h-3.5" />}
+                {soundEnabled ? <Volume2 className="w-3 h-3" /> : <VolumeX className="w-3 h-3" />}
               </button>
 
             {/* Compact Aesthetic Cloud Sync Box next to Sound & Night Mode */}
             {firebaseUser ? (
               <div
-                className="flex items-center gap-1.5 ps-1.5 pe-2 py-1 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-[10px] font-bold text-emerald-600 dark:text-emerald-400 transition-all"
+                className="flex items-center gap-1 ps-1 pe-1.5 py-0.5 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-[9.5px] font-bold text-emerald-600 dark:text-emerald-400 transition-all"
                 title={`متصل بالسحابة: ${firebaseUser.displayName || 'مستخدم تديكلت'}`}
               >
                 <div className="relative shrink-0">
@@ -4408,25 +4749,25 @@ export default function App() {
                       src={firebaseUser.photoURL}
                       alt={firebaseUser.displayName || 'User'}
                       referrerPolicy="no-referrer"
-                      className="w-4 h-4 rounded-full object-cover ring-1 ring-emerald-500/40"
+                      className="w-3.5 h-3.5 rounded-full object-cover ring-1 ring-emerald-500/40"
                     />
                   ) : (
-                    <div className="w-4 h-4 rounded-full bg-emerald-600 text-white text-[9px] font-bold flex items-center justify-center">
+                    <div className="w-3.5 h-3.5 rounded-full bg-emerald-600 text-white text-[8px] font-bold flex items-center justify-center">
                       {(firebaseUser.displayName || 'U').charAt(0)}
                     </div>
                   )}
-                  <span className="absolute -bottom-0.5 -end-0.5 w-1.5 h-1.5 rounded-full bg-emerald-500 ring-1 ring-[var(--card)]" />
+                  <span className="absolute -bottom-0.5 -end-0.5 w-1 h-1 rounded-full bg-emerald-500 ring-1 ring-[var(--card)]" />
                 </div>
-                <span className="truncate max-w-[54px]">
+                <span className="truncate max-w-[48px]">
                   {firebaseUser.displayName ? firebaseUser.displayName.split(' ')[0] : 'مزامنة'}
                 </span>
                 <button
                   type="button"
                   onClick={() => signOutUser()}
-                  className="ms-0.5 p-0.5 rounded-md hover:bg-rose-500/15 text-[var(--mute)] hover:text-rose-500 transition-colors cursor-pointer"
+                  className="ms-0.5 p-0.5 rounded hover:bg-rose-500/15 text-[var(--mute)] hover:text-rose-500 transition-colors cursor-pointer"
                   title="تسجيل الخروج من المزامنة"
                 >
-                  <X className="w-3 h-3" />
+                  <X className="w-2.5 h-2.5" />
                 </button>
               </div>
             ) : (
@@ -4453,13 +4794,13 @@ export default function App() {
                   }
                 }}
                 disabled={isFirebaseSigningIn}
-                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-[var(--bg)]/80 hover:bg-[var(--green)]/10 border border-[var(--line)] hover:border-[var(--green)]/40 text-[10px] font-bold text-[var(--mute)] hover:text-[var(--green)] transition-all cursor-pointer shadow-2xs"
+                className="flex items-center gap-1 px-2 py-1 rounded-lg bg-[var(--bg)]/80 hover:bg-[var(--green)]/10 border border-[var(--line)] hover:border-[var(--green)]/40 text-[9.5px] font-bold text-[var(--mute)] hover:text-[var(--green)] transition-all cursor-pointer shadow-2xs"
                 title="مزامنة الحساب والمحادثات عبر Google"
               >
                 {isFirebaseSigningIn ? (
-                  <Loader2 className="w-3.5 h-3.5 animate-spin text-[var(--green)] shrink-0" />
+                  <Loader2 className="w-3 h-3 animate-spin text-[var(--green)] shrink-0" />
                 ) : (
-                  <RefreshCw className="w-3 h-3 text-[var(--green)] shrink-0" />
+                  <RefreshCw className="w-2.5 h-2.5 text-[var(--green)] shrink-0" />
                 )}
                 <span className="whitespace-nowrap">
                   {isFirebaseSigningIn ? 'يتصل...' : 'مزامنة'}
@@ -4474,22 +4815,22 @@ export default function App() {
                   setView(view === 'admin' ? 'chat' : 'admin');
                   if (window.innerWidth < 768) setIsMobileSidebarOpen(false);
                 }}
-                className="p-1.5 rounded-xl border border-[var(--gold)]/40 text-[var(--gold)] bg-[var(--gold)]/10 font-bold cursor-pointer transition-colors"
+                className="p-1 rounded-lg border border-[var(--gold)]/40 text-[var(--gold)] bg-[var(--gold)]/10 font-bold cursor-pointer transition-colors"
                 title={t.adminPanel}
               >
-                <ShieldCheck className="w-3.5 h-3.5" />
+                <ShieldCheck className="w-3 h-3" />
               </button>
             )}
           </div>
 
-          <div className="flex items-center gap-1 text-[10px] text-[var(--mute)] font-semibold min-w-0 select-none">
+          <div className="flex items-center gap-1 text-[9.5px] text-[var(--mute)] font-semibold min-w-0 select-none">
             <img
               src="/icon.svg"
               alt={t.appName}
               referrerPolicy="no-referrer"
-              className="w-3.5 h-3.5 rounded-md object-cover ring-1 ring-cyan-500/30 shrink-0 opacity-90"
+              className="w-3 h-3 rounded object-cover ring-1 ring-cyan-500/30 shrink-0 opacity-90"
             />
-            <span className="whitespace-nowrap px-1.5 py-0.5 rounded-md bg-[var(--bg)]/90 border border-[var(--line)]/80 shadow-inner font-extrabold tracking-wide text-[var(--mute)] [text-shadow:0_1px_0_rgba(255,255,255,0.18),0_-1px_0_rgba(0,0,0,0.4)]">
+            <span className="whitespace-nowrap px-1 py-0.5 rounded bg-[var(--bg)]/90 border border-[var(--line)]/80 shadow-inner font-extrabold tracking-wide text-[var(--mute)]">
               {t.appName}
             </span>
           </div>
@@ -5383,6 +5724,43 @@ export default function App() {
                                 {/* Real Verified Generated File Card (Displayed when user requested a file or converted the answer) */}
                                 {m.generatedFile && <GeneratedFileCard file={m.generatedFile} />}
 
+                                {/* Interactive Store Price List Poster Cards (Stages 1, 2 & 3: Base, Reference Variation & 300 DPI PDF Export) */}
+                                {m.priceListPosters &&
+                                  m.priceListPosters.length > 0 &&
+                                  m.priceListPosters.map((poster) => (
+                                    <PriceListPosterCard
+                                      key={poster.id}
+                                      poster={poster}
+                                      isSelectedForPdf={Boolean(selectedPostersForPdf[poster.id])}
+                                      selectedCount={Object.keys(selectedPostersForPdf).length}
+                                      isActiveReference={activeReferencePoster?.poster.id === poster.id}
+                                      isExportingPdf={isExportingPriceListPdf}
+                                      pdfSettings={pdfExportSettings}
+                                      onUpdatePdfSettings={handleUpdatePdfExportSettings}
+                                      onToggleSelectForPdf={handleToggleSelectPosterForPdf}
+                                      onSetAsReference={(p, jpeg) =>
+                                        setActiveReferencePoster({ poster: p, jpegDataUrl: jpeg })
+                                      }
+                                      onGenerateVariationQuick={(refPoster, refJpeg, promptStr) => {
+                                        setActiveReferencePoster({
+                                          poster: refPoster,
+                                          jpegDataUrl: refJpeg,
+                                        });
+                                        handleSend(promptStr);
+                                      }}
+                                      onExportSelectedToPdf={(singleJpeg, fname, customSettings) =>
+                                        handleExportSelectedPostersToPdf(
+                                          singleJpeg,
+                                          fname,
+                                          m.id,
+                                          customSettings
+                                        )
+                                      }
+                                      onRunFullButcherDemo={handleRunFullButcherPriceListDemo}
+                                      onPreviewImage={(url) => setPreviewModalImage(url)}
+                                    />
+                                  ))}
+
                             {/* Dedicated Interactive Executed Code & Output Card (tidikelt-agent codeExecution) */}
                             {(m.code || m.codeOutput) && (
                               <div className="mt-4 rounded-2xl border border-[var(--line)] bg-[var(--bg)] overflow-hidden shadow-xs">
@@ -6267,6 +6645,30 @@ export default function App() {
                               </span>
                             </div>
                           </button>
+
+                          {/* 6. Store Price List & 300 DPI PDF Generator Shortcut */}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setIsPlusMenuOpen(false);
+                              handleSend(
+                                'صمم قائمة أسعار ملحمة: لحم بقري: 1800، صافي: 2200، داورة: 6000، كبدة: 3500'
+                              );
+                            }}
+                            className="w-full flex items-center gap-3 p-2 rounded-xl hover:bg-[var(--bg)] border border-transparent hover:border-[var(--line)]/60 transition-all cursor-pointer group text-right"
+                          >
+                            <div className="w-9 h-9 rounded-xl bg-amber-500/12 text-amber-500 flex items-center justify-center shrink-0 group-hover:scale-105 group-hover:bg-amber-500/20 transition-all shadow-2xs">
+                              <FileText className="w-4 h-4 stroke-[2.2]" />
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <span className="text-xs font-bold text-[var(--ink)] block group-hover:text-amber-500 transition-colors">
+                                توليد قوائم الأسعار المتناسقة + PDF للطباعة
+                              </span>
+                              <span className="text-[10px] text-[var(--mute)] block truncate">
+                                إنشاء قوائم أسعار متطابقة الهوية وتصديرها بدقة 300 DPI
+                              </span>
+                            </div>
+                          </button>
                         </div>
                       )}
 
@@ -6852,11 +7254,12 @@ export default function App() {
           </section>
         )}
 
-        {/* VIEW 2: NEWS / الأخبار (Senior-Friendly Community News Feed) */}
+        {/* VIEW 2: NEWS / الأخبار (كاش ما تعرف · محليات) */}
         {view === 'news' && (
-          <CommunityNewsPage
-            news={news}
-            setNews={setNews}
+          <div className="flex-1 flex flex-col w-full h-full min-h-0 overflow-hidden animate-in fade-in">
+            <CommunityNewsPage
+              news={news}
+              setNews={setNews}
             firebaseUser={firebaseUser}
             isFirebaseSigningIn={isFirebaseSigningIn}
             onSignInGoogle={async () => {
@@ -6876,7 +7279,8 @@ export default function App() {
             onBackToChat={() => setView('chat')}
             onEditNewsInAdmin={(item) => {
               setView('admin');
-              setAdminTab('all');
+              setAdminTab('news');
+              setAdminNewsStatusFilter('all');
               handleStartEditNews(item);
             }}
             onDeleteNews={(id) => handleRejectNews(id)}
@@ -6893,14 +7297,15 @@ export default function App() {
             onRefreshLiveNews={triggerDailyNewsGathering}
             isRefreshingLiveNews={isGatheringNews}
             onOpenRafiq={() => setView('rides')}
-            onToggleSidebar={() => {
-              if (window.innerWidth < 768) {
-                setIsMobileSidebarOpen((prev) => !prev);
-              } else {
-                setIsSidebarOpen((prev) => !prev);
-              }
-            }}
-          />
+              onToggleSidebar={() => {
+                if (window.innerWidth < 768) {
+                  setIsMobileSidebarOpen((prev) => !prev);
+                } else {
+                  setIsSidebarOpen((prev) => !prev);
+                }
+              }}
+            />
+          </div>
         )}
 
         {/* VIEW: RAFIQ AL-TARIQ / رفيق الطريق (Internal In-App View) */}
@@ -6924,12 +7329,13 @@ export default function App() {
 
         {/* VIEW: ADMIN / مدير النظام (Strictly guarded by active owner session) */}
         {view === 'admin' && isAdminLoggedIn && (
-          <section className="flex-1 overflow-y-auto px-4 sm:px-6 py-5 max-w-4xl mx-auto w-full space-y-4 animate-in fade-in">
+          <section className="admin-control-panel flex-1 overflow-y-auto px-4 sm:px-6 py-5 max-w-4xl mx-auto w-full space-y-4 animate-in fade-in">
             {/* Top Back bar */}
             <div className="flex items-center justify-between pb-2 border-b border-[var(--line)]">
               <button
+                type="button"
                 onClick={() => setView('chat')}
-                className="text-xs px-3 py-1.5 rounded-xl border border-[var(--line)] bg-[var(--card)] hover:bg-[var(--bg)] font-bold flex items-center gap-1.5 text-[var(--ink)] cursor-pointer shadow-2xs"
+                className="min-h-[44px] text-xs px-4 py-2.5 rounded-xl border border-[var(--line)] bg-[var(--card)] hover:bg-[var(--bg)] font-bold flex items-center justify-center gap-2 text-[var(--ink)] cursor-pointer shadow-2xs"
               >
                 <span>←</span>
                 <span>العودة للمحادثة الذكية</span>
@@ -6956,17 +7362,17 @@ export default function App() {
               </div>
 
               {/* Owner AI & API Quick Tools Toolbar */}
-              <div className="flex items-center gap-1.5 flex-wrap">
+              <div className="flex items-center gap-2 flex-wrap">
                 <button
                   type="button"
                   onClick={() => {
                     setTrainingStudioInitialTab('sft');
                     setIsTrainingStudioOpen(true);
                   }}
-                  className="px-2.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold flex items-center gap-1.5 shadow-xs cursor-pointer transition-all"
+                  className="px-3.5 py-2.5 min-h-[44px] rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold flex items-center justify-center gap-2 shadow-xs cursor-pointer transition-all"
                   title="مستودع تدريب الذكاء وقاعدة المعرفة RAG"
                 >
-                  <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+                  <Sparkles className="w-4 h-4 text-amber-300" />
                   <span>مستودع RAG والتدريب</span>
                 </button>
 
@@ -6976,108 +7382,119 @@ export default function App() {
                     setTrainingStudioInitialTab('avatars');
                     setIsTrainingStudioOpen(true);
                   }}
-                  className="px-2.5 py-1.5 rounded-xl bg-[var(--bg)] hover:bg-[var(--line)]/50 border border-[var(--line)] text-[var(--ink)] text-xs font-bold flex items-center gap-1.5 cursor-pointer transition-all"
+                  className="px-3.5 py-2.5 min-h-[44px] rounded-xl bg-[var(--bg)] hover:bg-[var(--line)]/50 border border-[var(--line)] text-[var(--ink)] text-xs font-bold flex items-center justify-center gap-2 cursor-pointer transition-all"
                   title="صور وهويات الوكلاء"
                 >
-                  <ImageIcon className="w-3.5 h-3.5 text-amber-500" />
+                  <ImageIcon className="w-4 h-4 text-amber-500" />
                   <span className="hidden sm:inline">صور الوكلاء</span>
                 </button>
 
                 <button
                   type="button"
                   onClick={() => setIsApiExplorerOpen(true)}
-                  className="px-2.5 py-1.5 rounded-xl bg-[var(--bg)] hover:bg-[var(--line)]/50 border border-[var(--line)] text-[var(--ink)] text-xs font-bold flex items-center gap-1.5 cursor-pointer transition-all"
+                  className="px-3.5 py-2.5 min-h-[44px] rounded-xl bg-[var(--bg)] hover:bg-[var(--line)]/50 border border-[var(--line)] text-[var(--ink)] text-xs font-bold flex items-center justify-center gap-2 cursor-pointer transition-all"
                   title="واجهة برمجة التطبيقات REST API"
                 >
-                  <Code2 className="w-3.5 h-3.5 text-blue-500" />
+                  <Code2 className="w-4 h-4 text-blue-500" />
                   <span>API</span>
                 </button>
 
                 <button
                   type="button"
                   onClick={handleAdminLogout}
-                  className="px-2.5 py-1.5 rounded-xl border border-[var(--bad)]/30 bg-[var(--bad)]/10 text-xs font-semibold text-[var(--bad)] hover:bg-[var(--bad)]/20 cursor-pointer transition-colors"
+                  className="px-4 py-2.5 min-h-[44px] rounded-xl border border-[var(--bad)]/30 bg-[var(--bad)]/10 text-xs font-bold text-[var(--bad)] hover:bg-[var(--bad)]/20 cursor-pointer transition-colors flex items-center justify-center"
                 >
                   خروج
                 </button>
               </div>
             </div>
 
-            {/* Admin Tabs */}
-            <div className="flex items-center gap-1.5 p-1 bg-[var(--card)] border border-[var(--line)] rounded-xl overflow-x-auto">
+            {/* Admin Tabs: 6 Distinct Sections (جهات ست مرتبة) with all buttons >= 44px */}
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 p-1.5 bg-[var(--card)] border border-[var(--line)] rounded-2xl shadow-sm">
               <button
-                onClick={() => setAdminTab('analytics')}
-                className={`flex-1 py-1.5 px-2.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-colors cursor-pointer flex items-center justify-center gap-1.5 ${
-                  adminTab === 'analytics'
-                    ? 'bg-[var(--green)] text-[var(--on)] font-bold shadow-sm'
-                    : 'text-[var(--mute)] hover:text-[var(--ink)]'
+                type="button"
+                onClick={() => setAdminTab('news')}
+                className={`min-h-[44px] py-2.5 px-3 rounded-xl text-xs font-bold whitespace-nowrap transition-all cursor-pointer flex items-center justify-center gap-2 relative ${
+                  adminTab === 'news'
+                    ? 'bg-[var(--green)] text-[var(--on)] shadow-sm'
+                    : 'bg-[var(--bg)] border border-[var(--line)] text-[var(--mute)] hover:text-[var(--ink)] hover:border-[var(--green)]'
                 }`}
               >
-                <BarChart3 className="w-3.5 h-3.5" />
-                <span>الإحصائيات</span>
-              </button>
-
-              <button
-                onClick={() => {
-                  setAdminTab('ratings');
-                  fetchAnalytics();
-                }}
-                className={`flex-1 py-1.5 px-2.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-colors cursor-pointer flex items-center justify-center gap-1.5 ${
-                  adminTab === 'ratings'
-                    ? 'bg-emerald-600 text-white font-bold shadow-sm'
-                    : 'text-[var(--mute)] hover:text-[var(--ink)]'
-                }`}
-              >
-                <ThumbsUp className="w-3.5 h-3.5" />
-                <span>التقييمات ({analyticsData?.ratingsStats?.total ?? 0})</span>
-              </button>
-
-              <button
-                onClick={() => setAdminTab('weather')}
-                className={`flex-1 py-1.5 px-2 rounded-lg text-xs font-semibold whitespace-nowrap transition-colors cursor-pointer flex items-center justify-center gap-1 ${
-                  adminTab === 'weather'
-                    ? 'bg-[var(--gold)] text-black font-bold shadow-sm'
-                    : 'text-[var(--mute)] hover:text-[var(--ink)]'
-                }`}
-              >
-                <Wind className="w-3.5 h-3.5" />
-                <span>تنبيه الطقس</span>
-              </button>
-
-              <button
-                onClick={() => setAdminTab('pending')}
-                className={`flex-1 py-1.5 px-2 rounded-lg text-xs font-semibold whitespace-nowrap transition-colors cursor-pointer relative ${
-                  adminTab === 'pending'
-                    ? 'bg-[var(--green)] text-[var(--on)] font-bold'
-                    : 'text-[var(--mute)] hover:text-[var(--ink)]'
-                }`}
-              >
-                <span>المعلقة ({pendingNews.length})</span>
+                <Megaphone className="w-4 h-4 shrink-0" />
+                <span>1. المستجدات والأخبار</span>
                 {pendingNews.length > 0 && (
-                  <span className="absolute top-1 right-2 w-1.5 h-1.5 rounded-full bg-[var(--gold)]" />
+                  <span className="px-1.5 py-0.5 rounded-full text-[10px] font-black bg-[var(--gold)] text-black">
+                    {pendingNews.length}
+                  </span>
                 )}
               </button>
 
               <button
-                onClick={() => setAdminTab('all')}
-                className={`flex-1 py-1.5 px-2 rounded-lg text-xs font-semibold whitespace-nowrap transition-colors cursor-pointer ${
-                  adminTab === 'all'
-                    ? 'bg-[var(--green)] text-[var(--on)] font-bold'
-                    : 'text-[var(--mute)] hover:text-[var(--ink)]'
+                type="button"
+                onClick={() => setAdminTab('weather')}
+                className={`min-h-[44px] py-2.5 px-3 rounded-xl text-xs font-bold whitespace-nowrap transition-all cursor-pointer flex items-center justify-center gap-2 ${
+                  adminTab === 'weather'
+                    ? 'bg-[var(--gold)] text-black shadow-sm font-extrabold'
+                    : 'bg-[var(--bg)] border border-[var(--line)] text-[var(--mute)] hover:text-[var(--ink)] hover:border-[var(--gold)]'
                 }`}
               >
-                <span>الأخبار ({news.length})</span>
+                <Wind className="w-4 h-4 shrink-0" />
+                <span>2. تنبيه الطقس والموجز</span>
               </button>
 
               <button
-                onClick={() => setAdminTab('settings')}
-                className={`flex-1 py-1.5 px-2 rounded-lg text-xs font-semibold whitespace-nowrap transition-colors cursor-pointer ${
-                  adminTab === 'settings'
-                    ? 'bg-[var(--green)] text-[var(--on)] font-bold'
-                    : 'text-[var(--mute)] hover:text-[var(--ink)]'
+                type="button"
+                onClick={() => setAdminTab('analytics')}
+                className={`min-h-[44px] py-2.5 px-3 rounded-xl text-xs font-bold whitespace-nowrap transition-all cursor-pointer flex items-center justify-center gap-2 ${
+                  adminTab === 'analytics'
+                    ? 'bg-[var(--green)] text-[var(--on)] shadow-sm'
+                    : 'bg-[var(--bg)] border border-[var(--line)] text-[var(--mute)] hover:text-[var(--ink)] hover:border-[var(--green)]'
                 }`}
               >
-                <span>الإعدادات والصيانة</span>
+                <BarChart3 className="w-4 h-4 shrink-0" />
+                <span>3. مؤشرات الأداء</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setAdminTab('ratings');
+                  fetchAnalytics();
+                }}
+                className={`min-h-[44px] py-2.5 px-3 rounded-xl text-xs font-bold whitespace-nowrap transition-all cursor-pointer flex items-center justify-center gap-2 ${
+                  adminTab === 'ratings'
+                    ? 'bg-emerald-600 text-white shadow-sm'
+                    : 'bg-[var(--bg)] border border-[var(--line)] text-[var(--mute)] hover:text-[var(--ink)] hover:border-emerald-500'
+                }`}
+              >
+                <ThumbsUp className="w-4 h-4 shrink-0" />
+                <span>4. تقييمات الخدمة ({analyticsData?.ratingsStats?.total ?? 0})</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setAdminTab('pin')}
+                className={`min-h-[44px] py-2.5 px-3 rounded-xl text-xs font-bold whitespace-nowrap transition-all cursor-pointer flex items-center justify-center gap-2 ${
+                  adminTab === 'pin'
+                    ? 'bg-amber-600 text-white shadow-sm'
+                    : 'bg-[var(--bg)] border border-[var(--line)] text-[var(--mute)] hover:text-[var(--ink)] hover:border-amber-500'
+                }`}
+              >
+                <Lock className="w-4 h-4 shrink-0" />
+                <span>5. رمز المشرف (PIN)</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setAdminTab('settings')}
+                className={`min-h-[44px] py-2.5 px-3 rounded-xl text-xs font-bold whitespace-nowrap transition-all cursor-pointer flex items-center justify-center gap-2 ${
+                  adminTab === 'settings'
+                    ? 'bg-[var(--green)] text-[var(--on)] shadow-sm'
+                    : 'bg-[var(--bg)] border border-[var(--line)] text-[var(--mute)] hover:text-[var(--ink)] hover:border-[var(--green)]'
+                }`}
+              >
+                <SlidersHorizontal className="w-4 h-4 shrink-0" />
+                <span>6. الصيانة والإعدادات</span>
               </button>
             </div>
 
@@ -7091,15 +7508,16 @@ export default function App() {
                     <span className="text-xs font-bold text-[var(--ink)]">مؤشرات الأداء وجودة الخدمة</span>
                   </div>
 
-                  <div className="flex items-center gap-1.5">
+                  <div className="flex items-center gap-2">
                     <button
+                      type="button"
                       onClick={fetchAnalytics}
                       disabled={isLoadingStats}
-                      className="px-3 py-1.5 rounded-xl border border-[var(--line)] bg-[var(--bg)] hover:border-[var(--green)] text-xs font-semibold text-[var(--ink)] flex items-center gap-1.5 cursor-pointer transition-colors shadow-2xs"
+                      className="min-h-[44px] px-3.5 py-2.5 rounded-xl border border-[var(--line)] bg-[var(--bg)] hover:border-[var(--green)] text-xs font-bold text-[var(--ink)] flex items-center justify-center gap-2 cursor-pointer transition-colors shadow-2xs"
                       title="تحديث البيانات لحظياً"
                     >
                       <RefreshCw
-                        className={`w-3.5 h-3.5 ${
+                        className={`w-4 h-4 ${
                           isLoadingStats ? 'animate-spin text-[var(--green)]' : 'text-[var(--mute)]'
                         }`}
                       />
@@ -7107,11 +7525,13 @@ export default function App() {
                     </button>
 
                     <button
+                      type="button"
                       onClick={handleResetStats}
-                      className="p-1.5 rounded-xl border border-[var(--line)] bg-[var(--bg)] text-xs text-[var(--mute)] hover:text-rose-500 cursor-pointer transition-colors"
+                      className="min-h-[44px] px-3.5 py-2.5 rounded-xl border border-[var(--line)] bg-[var(--bg)] text-xs font-bold text-[var(--mute)] hover:text-rose-500 cursor-pointer transition-colors flex items-center justify-center gap-1.5"
                       title="إعادة ضبط السجل وتحديث البيانات"
                     >
-                      <RotateCcw className="w-3.5 h-3.5" />
+                      <RotateCcw className="w-4 h-4" />
+                      <span>إعادة ضبط</span>
                     </button>
                   </div>
                 </div>
@@ -7730,10 +8150,11 @@ export default function App() {
                     </div>
 
                     {/* Filter Tabs */}
-                    <div className="flex items-center gap-1 bg-[var(--bg)] p-1 rounded-xl border border-[var(--line)]">
+                    <div className="flex items-center gap-1.5 bg-[var(--bg)] p-1 rounded-xl border border-[var(--line)]">
                       <button
+                        type="button"
                         onClick={() => setAdminRatingFilter('all')}
-                        className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-colors cursor-pointer ${
+                        className={`min-h-[44px] px-3.5 py-2 rounded-xl text-xs font-bold transition-colors cursor-pointer flex items-center justify-center ${
                           adminRatingFilter === 'all'
                             ? 'bg-[var(--green)] text-white shadow-2xs'
                             : 'text-[var(--mute)] hover:text-[var(--ink)]'
@@ -7742,25 +8163,27 @@ export default function App() {
                         الكل ({analyticsData?.ratingsStats?.total ?? 0})
                       </button>
                       <button
+                        type="button"
                         onClick={() => setAdminRatingFilter('like')}
-                        className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-colors cursor-pointer flex items-center gap-1 ${
+                        className={`min-h-[44px] px-3.5 py-2 rounded-xl text-xs font-bold transition-colors cursor-pointer flex items-center justify-center gap-1.5 ${
                           adminRatingFilter === 'like'
                             ? 'bg-emerald-600 text-white shadow-2xs'
                             : 'text-[var(--mute)] hover:text-emerald-600'
                         }`}
                       >
-                        <ThumbsUp className="w-3 h-3" />
+                        <ThumbsUp className="w-4 h-4" />
                         <span>أعجبني ({analyticsData?.ratingsStats?.likes ?? 0})</span>
                       </button>
                       <button
+                        type="button"
                         onClick={() => setAdminRatingFilter('dislike')}
-                        className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-colors cursor-pointer flex items-center gap-1 ${
+                        className={`min-h-[44px] px-3.5 py-2 rounded-xl text-xs font-bold transition-colors cursor-pointer flex items-center justify-center gap-1.5 ${
                           adminRatingFilter === 'dislike'
                             ? 'bg-rose-600 text-white shadow-2xs'
                             : 'text-[var(--mute)] hover:text-rose-600'
                         }`}
                       >
-                        <ThumbsDown className="w-3 h-3" />
+                        <ThumbsDown className="w-4 h-4" />
                         <span>لم يعجبني ({analyticsData?.ratingsStats?.dislikes ?? 0})</span>
                       </button>
                     </div>
@@ -7881,7 +8304,7 @@ export default function App() {
                       onClick={() =>
                         handleSetNotificationsPermanentlyDisabled(!notificationsPermanentlyDisabled)
                       }
-                      className={`px-3.5 py-2 rounded-xl text-xs font-extrabold transition-all cursor-pointer shrink-0 flex items-center gap-1.5 ${
+                      className={`min-h-[44px] px-4 py-2.5 rounded-xl text-xs font-extrabold transition-all cursor-pointer shrink-0 flex items-center justify-center gap-2 ${
                         notificationsPermanentlyDisabled
                           ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-xs'
                           : 'bg-rose-600 hover:bg-rose-500 text-white shadow-xs'
@@ -7889,12 +8312,12 @@ export default function App() {
                     >
                       {notificationsPermanentlyDisabled ? (
                         <>
-                          <Bell className="w-3.5 h-3.5" />
+                          <Bell className="w-4 h-4" />
                           <span>التنبيهات ممنوعة حالياً · اضغط لإعادة التفعيل</span>
                         </>
                       ) : (
                         <>
-                          <BellOff className="w-3.5 h-3.5" />
+                          <BellOff className="w-4 h-4" />
                           <span>منع التنبيهات نهائياً للزوار</span>
                         </>
                       )}
@@ -7915,14 +8338,15 @@ export default function App() {
                     </div>
 
                     <button
+                      type="button"
                       onClick={() => setEditAlertActive(!editAlertActive)}
-                      className={`w-12 h-6 rounded-full transition-colors relative cursor-pointer ${
+                      className={`min-h-[44px] min-w-[56px] px-2 rounded-full transition-colors relative cursor-pointer flex items-center ${
                         editAlertActive ? 'bg-[var(--gold)]' : 'bg-[var(--line)]'
                       }`}
                     >
                       <span
-                        className={`absolute top-1 w-4 h-4 rounded-full bg-white transition-transform ${
-                          editAlertActive ? 'right-1' : 'right-7'
+                        className={`w-6 h-6 rounded-full bg-white transition-transform ${
+                          editAlertActive ? 'translate-x-0' : 'translate-x-6 rtl:-translate-x-6'
                         }`}
                       />
                     </button>
@@ -7933,13 +8357,13 @@ export default function App() {
                     <span className="text-[11px] text-[var(--mute)] font-semibold block">
                       نماذج جاهزة للاختيار السريع:
                     </span>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                       {WEATHER_PRESETS.map((preset, idx) => (
                         <button
                           key={idx}
                           type="button"
                           onClick={() => handleApplyPreset(preset)}
-                          className="p-2 rounded-xl bg-[var(--bg)] border border-[var(--line)] text-right hover:border-[var(--gold)] transition-colors cursor-pointer"
+                          className="min-h-[44px] p-2.5 rounded-xl bg-[var(--bg)] border border-[var(--line)] text-right hover:border-[var(--gold)] transition-colors cursor-pointer flex flex-col justify-center"
                         >
                           <span className="text-xs font-bold text-[var(--ink)] block">{preset.name}</span>
                           <span className="text-[10px] text-[var(--mute)] line-clamp-1">{preset.title}</span>
@@ -7957,7 +8381,7 @@ export default function App() {
                       <button
                         type="button"
                         onClick={() => setEditAlertSeverity('warning')}
-                        className={`p-2 rounded-xl border text-xs font-bold text-center cursor-pointer transition-all ${
+                        className={`min-h-[44px] p-2.5 rounded-xl border text-xs font-bold text-center cursor-pointer transition-all flex items-center justify-center gap-1 ${
                           editAlertSeverity === 'warning'
                             ? 'bg-amber-500/20 border-amber-500 text-amber-500 ring-2 ring-amber-500/30'
                             : 'bg-[var(--bg)] border-[var(--line)] text-[var(--mute)]'
@@ -7969,7 +8393,7 @@ export default function App() {
                       <button
                         type="button"
                         onClick={() => setEditAlertSeverity('danger')}
-                        className={`p-2 rounded-xl border text-xs font-bold text-center cursor-pointer transition-all ${
+                        className={`min-h-[44px] p-2.5 rounded-xl border text-xs font-bold text-center cursor-pointer transition-all flex items-center justify-center gap-1 ${
                           editAlertSeverity === 'danger'
                             ? 'bg-rose-500/20 border-rose-500 text-rose-500 ring-2 ring-rose-500/30'
                             : 'bg-[var(--bg)] border-[var(--line)] text-[var(--mute)]'
@@ -7981,7 +8405,7 @@ export default function App() {
                       <button
                         type="button"
                         onClick={() => setEditAlertSeverity('info')}
-                        className={`p-2 rounded-xl border text-xs font-bold text-center cursor-pointer transition-all ${
+                        className={`min-h-[44px] p-2.5 rounded-xl border text-xs font-bold text-center cursor-pointer transition-all flex items-center justify-center gap-1 ${
                           editAlertSeverity === 'info'
                             ? 'bg-emerald-500/20 border-emerald-500 text-emerald-500 ring-2 ring-emerald-500/30'
                             : 'bg-[var(--bg)] border-[var(--line)] text-[var(--mute)]'
@@ -8002,7 +8426,7 @@ export default function App() {
                         <select
                           value={editAlertDataType}
                           onChange={(e) => setEditAlertDataType(e.target.value as 'live' | 'simulation')}
-                          className="w-full border border-[var(--line)] bg-[var(--bg)] text-[var(--ink)] rounded-xl px-3 py-2 text-xs font-semibold focus:outline-none focus:border-[var(--gold)]"
+                          className="admin-input-field w-full min-h-[44px] border border-[var(--line)] bg-[var(--bg)] text-[var(--ink)] rounded-xl px-3 py-2 text-xs font-semibold focus:outline-none focus:border-[var(--gold)]"
                         >
                           <option value="live">🟢 نشرة رسمية حية موثقة ميدانياً</option>
                           <option value="simulation">🧪 بيانات تجريبية / محاكاة تدريبية (اختبار)</option>
@@ -8016,7 +8440,7 @@ export default function App() {
                         <select
                           value={editAlertDurationHours}
                           onChange={(e) => setEditAlertDurationHours(Number(e.target.value))}
-                          className="w-full border border-[var(--line)] bg-[var(--bg)] text-[var(--ink)] rounded-xl px-3 py-2 text-xs font-semibold focus:outline-none focus:border-[var(--gold)]"
+                          className="admin-input-field w-full min-h-[44px] border border-[var(--line)] bg-[var(--bg)] text-[var(--ink)] rounded-xl px-3 py-2 text-xs font-semibold focus:outline-none focus:border-[var(--gold)]"
                         >
                           <option value={2}>ينتهي تلقائياً بعد ساعتين (2h)</option>
                           <option value={6}>ينتهي تلقائياً بعد 6 ساعات (6h)</option>
@@ -8036,7 +8460,7 @@ export default function App() {
                         value={editAlertSource}
                         onChange={(e) => setEditAlertSource(e.target.value)}
                         placeholder="مثال: الديوان الوطني للأرصاد الجوية (ONM) / خلية اليقظة لولاية عين صالح"
-                        className="w-full border border-[var(--line)] bg-[var(--bg)] text-[var(--ink)] rounded-xl px-3.5 py-2 text-xs font-semibold focus:outline-none focus:border-[var(--gold)]"
+                        className="admin-input-field w-full min-h-[44px] border border-[var(--line)] bg-[var(--bg)] text-[var(--ink)] rounded-xl px-3.5 py-2 text-xs font-semibold focus:outline-none focus:border-[var(--gold)]"
                       />
                     </div>
 
@@ -8049,7 +8473,7 @@ export default function App() {
                         value={editAlertTitle}
                         onChange={(e) => setEditAlertTitle(e.target.value)}
                         placeholder="مثال: تنبيه جوي عاجل: رياح رملية قوية على طريق تمنراست..."
-                        className="w-full border border-[var(--line)] bg-[var(--bg)] text-[var(--ink)] rounded-xl px-3.5 py-2 text-xs font-semibold focus:outline-none focus:border-[var(--gold)]"
+                        className="admin-input-field w-full min-h-[44px] border border-[var(--line)] bg-[var(--bg)] text-[var(--ink)] rounded-xl px-3.5 py-2 text-xs font-semibold focus:outline-none focus:border-[var(--gold)]"
                       />
                     </div>
 
@@ -8062,7 +8486,7 @@ export default function App() {
                         onChange={(e) => setEditAlertMessage(e.target.value)}
                         rows={3}
                         placeholder="نص التنبيه وإرشادات السائقين والمسافرين..."
-                        className="w-full border border-[var(--line)] bg-[var(--bg)] text-[var(--ink)] rounded-xl p-3 text-xs leading-relaxed focus:outline-none focus:border-[var(--gold)] resize-none"
+                        className="admin-input-field w-full border border-[var(--line)] bg-[var(--bg)] text-[var(--ink)] rounded-xl p-3 text-xs leading-relaxed focus:outline-none focus:border-[var(--gold)] resize-none"
                       />
                     </div>
                   </div>
@@ -8072,7 +8496,7 @@ export default function App() {
                     <button
                       type="button"
                       onClick={handleSaveWeatherAlert}
-                      className="flex-1 bg-[var(--gold)] text-black rounded-xl py-2.5 text-xs font-bold flex items-center justify-center gap-1.5 shadow-md hover:bg-amber-400 transition-colors cursor-pointer"
+                      className="flex-1 min-h-[44px] bg-[var(--gold)] text-black rounded-xl py-2.5 px-4 text-xs font-black flex items-center justify-center gap-2 shadow-md hover:bg-amber-400 transition-colors cursor-pointer"
                     >
                       <Check className="w-4 h-4" />
                       <span>حفظ واعتماد التنبيه الجوي فوراً</span>
@@ -8085,7 +8509,7 @@ export default function App() {
                           setEditAlertActive(false);
                           setWeatherAlert((prev) => ({ ...prev, active: false }));
                         }}
-                        className="px-3 py-2.5 rounded-xl border border-[var(--bad)] text-[var(--bad)] hover:bg-[var(--bad)]/10 text-xs font-bold cursor-pointer"
+                        className="min-h-[44px] px-4 py-2.5 rounded-xl border border-[var(--bad)] text-[var(--bad)] hover:bg-[var(--bad)]/10 text-xs font-bold cursor-pointer"
                       >
                         إلغاء التنبيه
                       </button>
@@ -8137,279 +8561,473 @@ export default function App() {
               </div>
             )}
 
-            {/* TAB: PENDING NEWS */}
-            {adminTab === 'pending' && (
-              <div className="space-y-3">
-                <div className="flex items-center justify-between px-1">
-                  <b className="text-xs text-[var(--ink)]">أخبار السكان بانتظار المراجعة والتدقيق</b>
-                  <span className="text-[11px] text-[var(--mute)]">{pendingNews.length} خبر معلق</span>
+            {/* TAB 1: SECTION 1 - المستجدات والأخبار (معلّق، منشور، مرفوض، إضافة، اعتماد ونشر) */}
+            {adminTab === 'news' && (
+              <div className="space-y-4">
+                {/* News Status Filter & Admin Actions Header */}
+                <div className="bg-[var(--card)] border border-[var(--line)] rounded-2xl p-4 shadow-sm space-y-3">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-[var(--line)] pb-3">
+                    <div>
+                      <b className="text-sm font-extrabold text-[var(--ink)] block flex items-center gap-2">
+                        <Megaphone className="w-4 h-4 text-[var(--green)]" />
+                        <span>إدارة المستجدات والأخبار الميدانية</span>
+                      </b>
+                      <p className="text-[11px] text-[var(--mute)] m-0 mt-0.5">
+                        اعتماد ونشر الأخبار، تدقيق المعلقات، مراجعة المرفوضات، وإضافة تنويهات إدارية رسمية.
+                      </p>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => setIsAddingAdminNews((prev) => !prev)}
+                      className="min-h-[44px] px-4 py-2.5 rounded-xl bg-[var(--green)] hover:opacity-90 text-[var(--on)] text-xs font-bold flex items-center justify-center gap-2 shadow-xs cursor-pointer transition-all"
+                    >
+                      <Plus className="w-4 h-4" />
+                      <span>{isAddingAdminNews ? 'إلغاء الإضافة' : 'إضافة مستجد جديد كمدير'}</span>
+                    </button>
+                  </div>
+
+                  {/* Add Admin News Collapsible Form */}
+                  {isAddingAdminNews && (
+                    <div className="p-4 rounded-2xl bg-[var(--bg)] border border-[var(--line)] space-y-3 animate-in fade-in">
+                      <b className="text-xs font-extrabold text-[var(--green)] block">
+                        نشر خبر أو مستجد رسمي فوري باسم الإدارة:
+                      </b>
+
+                      <div className="space-y-1">
+                        <label className="text-[11px] font-bold text-[var(--mute)] block">التصنيف:</label>
+                        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-1.5">
+                          {NEWS_CATEGORIES.map((c) => (
+                            <button
+                              key={c.id}
+                              type="button"
+                              onClick={() => setAdminNewCategory(c.id)}
+                              className={`min-h-[44px] px-2.5 py-2 rounded-xl border text-xs font-bold cursor-pointer transition-all flex items-center justify-center gap-1.5 ${
+                                adminNewCategory === c.id
+                                  ? 'bg-[var(--green)] text-white border-[var(--green)] shadow-xs'
+                                  : 'bg-[var(--card)] border-[var(--line)] text-[var(--ink)] hover:border-[var(--green)]'
+                              }`}
+                            >
+                              <span>{c.emoji}</span>
+                              <span>{c.name}</span>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div className="space-y-1">
+                        <label className="text-[11px] font-bold text-[var(--mute)] block">المصدر الرسمي:</label>
+                        <input
+                          type="text"
+                          value={adminNewSource}
+                          onChange={(e) => setAdminNewSource(e.target.value)}
+                          placeholder="مثال: إدارة المساعد / مصالح بلدية عين صالح / خلية الإعلام"
+                          className="admin-input-field w-full min-h-[44px] border border-[var(--line)] bg-[var(--card)] text-[var(--ink)] rounded-xl px-3.5 py-2 text-xs font-bold focus:outline-none focus:border-[var(--green)]"
+                        />
+                      </div>
+
+                      <div className="space-y-1">
+                        <label className="text-[11px] font-bold text-[var(--mute)] block">نص المستجد والتفاصيل:</label>
+                        <textarea
+                          value={adminNewText}
+                          onChange={(e) => setAdminNewText(e.target.value)}
+                          rows={3}
+                          placeholder="اكتب نص الخبر أو الإعلان المعتمد هنا..."
+                          className="admin-input-field w-full border border-[var(--line)] bg-[var(--card)] text-[var(--ink)] rounded-xl p-3 text-xs leading-relaxed focus:outline-none focus:border-[var(--green)] resize-none font-medium"
+                        />
+                      </div>
+
+                      <div className="flex items-center gap-2 pt-1">
+                        <button
+                          type="button"
+                          onClick={handleCreateAdminNews}
+                          disabled={!adminNewText.trim()}
+                          className="flex-1 min-h-[44px] px-4 py-2.5 rounded-xl bg-[var(--green)] hover:opacity-90 disabled:opacity-40 text-[var(--on)] text-xs font-extrabold flex items-center justify-center gap-2 shadow-xs cursor-pointer transition-all"
+                        >
+                          <Check className="w-4 h-4" />
+                          <span>اعتماد ونشر المستجد فوراً</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setIsAddingAdminNews(false)}
+                          className="min-h-[44px] px-4 py-2.5 rounded-xl border border-[var(--line)] bg-[var(--card)] text-[var(--mute)] hover:text-[var(--ink)] text-xs font-bold cursor-pointer transition-colors"
+                        >
+                          إلغاء
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* 4 Status Tabs: معلّق، منشور، مرفوض، الكل (All Buttons >= 44px) */}
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1">
+                    <button
+                      type="button"
+                      onClick={() => setAdminNewsStatusFilter('pending')}
+                      className={`min-h-[44px] py-2.5 px-3 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-2 ${
+                        adminNewsStatusFilter === 'pending'
+                          ? 'bg-[var(--gold)] text-black font-extrabold shadow-sm'
+                          : 'bg-[var(--bg)] border border-[var(--line)] text-[var(--mute)] hover:text-[var(--ink)]'
+                      }`}
+                    >
+                      <Clock className="w-4 h-4 shrink-0" />
+                      <span>معلّق ({pendingNews.length})</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setAdminNewsStatusFilter('approved')}
+                      className={`min-h-[44px] py-2.5 px-3 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-2 ${
+                        adminNewsStatusFilter === 'approved'
+                          ? 'bg-[var(--green)] text-[var(--on)] font-extrabold shadow-sm'
+                          : 'bg-[var(--bg)] border border-[var(--line)] text-[var(--mute)] hover:text-[var(--ink)]'
+                      }`}
+                    >
+                      <CheckCircle2 className="w-4 h-4 shrink-0" />
+                      <span>منشور ({approvedNews.length})</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setAdminNewsStatusFilter('rejected')}
+                      className={`min-h-[44px] py-2.5 px-3 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-2 ${
+                        adminNewsStatusFilter === 'rejected'
+                          ? 'bg-rose-600 text-white font-extrabold shadow-sm'
+                          : 'bg-[var(--bg)] border border-[var(--line)] text-[var(--mute)] hover:text-rose-500'
+                      }`}
+                    >
+                      <XCircle className="w-4 h-4 shrink-0" />
+                      <span>مرفوض ({rejectedNews.length})</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setAdminNewsStatusFilter('all')}
+                      className={`min-h-[44px] py-2.5 px-3 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-2 ${
+                        adminNewsStatusFilter === 'all'
+                          ? 'bg-[var(--ink)] text-[var(--bg)] font-extrabold shadow-sm'
+                          : 'bg-[var(--bg)] border border-[var(--line)] text-[var(--mute)] hover:text-[var(--ink)]'
+                      }`}
+                    >
+                      <span>الكل ({news.length})</span>
+                    </button>
+                  </div>
                 </div>
 
-                {pendingNews.length === 0 ? (
-                  <div className="p-8 text-center bg-[var(--card)] border border-[var(--line)] rounded-2xl space-y-2">
-                    <CheckCircle2 className="w-8 h-8 text-[var(--green)] mx-auto" />
-                    <b className="text-xs text-[var(--ink)] block">لا توجد أخبار معلقة للمراجعة</b>
-                    <p className="text-[11px] text-[var(--mute)] m-0">
-                      كل الأخبار المضافة تمت مراجعتها وهي معتمدة بالكامل أو لا توجد إرساليات جديدة.
-                    </p>
-                  </div>
-                ) : (
-                  pendingNews.map((item) => (
-                    <div
-                      key={item.id}
-                      className="bg-[var(--card)] border-2 border-[var(--gold)]/40 rounded-2xl p-4 space-y-3 shadow-sm"
-                    >
-                      {editingNewsId === item.id ? (
-                        <div className="space-y-2.5">
-                          <b className="text-xs text-[var(--gold)] block">تعديل المعلومة قبل الاعتماد:</b>
-                          
-                          {/* Category Choice */}
-                          <div className="space-y-1">
-                            <span className="text-[10px] text-[var(--mute)] block">التصنيف:</span>
-                            <div className="flex flex-wrap gap-1">
-                              {NEWS_CATEGORIES.map((c) => (
-                                <button
-                                  key={c.id}
-                                  type="button"
-                                  onClick={() => setEditCategory(c.id)}
-                                  className={`px-2 py-1 rounded-lg border text-[11px] font-bold cursor-pointer transition-all ${
-                                    editCategory === c.id
-                                      ? 'bg-[var(--green)] text-white border-[var(--green)]'
-                                      : 'bg-[var(--bg)] border-[var(--line)] text-[var(--ink)]'
-                                  }`}
-                                >
-                                  <span>{c.emoji}</span>
-                                  <span>{c.name}</span>
-                                </button>
-                              ))}
-                            </div>
-                          </div>
+                {/* News Items List for Selected Status Filter */}
+                <div className="space-y-3">
+                  {(() => {
+                    const currentList =
+                      adminNewsStatusFilter === 'pending'
+                        ? pendingNews
+                        : adminNewsStatusFilter === 'approved'
+                        ? approvedNews
+                        : adminNewsStatusFilter === 'rejected'
+                        ? rejectedNews
+                        : news;
 
-                          <input
-                            type="text"
-                            value={editSource}
-                            onChange={(e) => setEditSource(e.target.value)}
-                            className="w-full border border-[var(--line)] bg-[var(--bg)] text-[var(--ink)] rounded-xl px-3 py-1.5 text-xs"
-                          />
-                          <textarea
-                            value={editText}
-                            onChange={(e) => setEditText(e.target.value)}
-                            rows={3}
-                            className="w-full border border-[var(--line)] bg-[var(--bg)] text-[var(--ink)] rounded-xl p-3 text-xs"
-                          />
-                          <div className="flex items-center gap-2">
-                            <button
-                              onClick={() => handleSaveEditNews(item.id)}
-                              className="bg-[var(--green)] text-[var(--on)] rounded-xl px-3 py-1.5 text-xs font-bold cursor-pointer"
-                            >
-                              حفظ واعتماد النشر
-                            </button>
-                            <button
-                              onClick={() => setEditingNewsId(null)}
-                              className="border border-[var(--line)] rounded-xl px-3 py-1.5 text-xs text-[var(--mute)] cursor-pointer"
-                            >
-                              إلغاء
-                            </button>
-                          </div>
+                    if (currentList.length === 0) {
+                      return (
+                        <div className="p-8 text-center bg-[var(--card)] border border-[var(--line)] rounded-2xl space-y-2">
+                          <CheckCircle2 className="w-8 h-8 text-[var(--green)] mx-auto opacity-75" />
+                          <b className="text-xs text-[var(--ink)] block">
+                            لا توجد عناصر في قائمة «
+                            {adminNewsStatusFilter === 'pending'
+                              ? 'معلّق'
+                              : adminNewsStatusFilter === 'approved'
+                              ? 'منشور'
+                              : adminNewsStatusFilter === 'rejected'
+                              ? 'مرفوض'
+                              : 'الكل'}
+                            » حالياً
+                          </b>
+                          <p className="text-[11px] text-[var(--mute)] m-0">
+                            يمكنك التبديل إلى فلتر آخر أو إضافة مستجد جديد من الزر أعلاه.
+                          </p>
                         </div>
-                      ) : (
-                        <>
-                          <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-2">
-                              {(() => {
-                                const cat = getCategoryDetails(item.category);
-                                return (
+                      );
+                    }
+
+                    return currentList.map((item) => {
+                      const cat = getCategoryDetails(item.category);
+                      const isPending = item.status === 'pending';
+                      const isApproved = item.status === 'approved' || !item.status;
+                      const isRejected = item.status === 'rejected';
+
+                      return (
+                        <div
+                          key={item.id}
+                          className={`bg-[var(--card)] rounded-2xl p-4 space-y-3 shadow-sm border transition-all ${
+                            isPending
+                              ? 'border-2 border-[var(--gold)]/50 bg-[var(--gold)]/5'
+                              : isRejected
+                              ? 'border border-rose-500/30 bg-rose-500/5'
+                              : 'border border-[var(--line)]'
+                          }`}
+                        >
+                          {editingNewsId === item.id ? (
+                            <div className="space-y-3">
+                              <b className="text-xs font-bold text-[var(--green)] block">
+                                تعديل المستجد وحفظه:
+                              </b>
+
+                              <div className="space-y-1">
+                                <span className="text-[10px] text-[var(--mute)] font-bold block">التصنيف:</span>
+                                <div className="flex flex-wrap gap-1.5">
+                                  {NEWS_CATEGORIES.map((c) => (
+                                    <button
+                                      key={c.id}
+                                      type="button"
+                                      onClick={() => setEditCategory(c.id)}
+                                      className={`min-h-[44px] px-3 py-2 rounded-xl border text-xs font-bold cursor-pointer transition-all flex items-center gap-1.5 ${
+                                        editCategory === c.id
+                                          ? 'bg-[var(--green)] text-white border-[var(--green)] shadow-xs'
+                                          : 'bg-[var(--bg)] border-[var(--line)] text-[var(--ink)]'
+                                      }`}
+                                    >
+                                      <span>{c.emoji}</span>
+                                      <span>{c.name}</span>
+                                    </button>
+                                  ))}
+                                </div>
+                              </div>
+
+                              <input
+                                type="text"
+                                value={editSource}
+                                onChange={(e) => setEditSource(e.target.value)}
+                                className="admin-input-field w-full min-h-[44px] border border-[var(--line)] bg-[var(--bg)] text-[var(--ink)] rounded-xl px-3.5 py-2 text-xs font-bold focus:outline-none focus:border-[var(--green)]"
+                              />
+                              <textarea
+                                value={editText}
+                                onChange={(e) => setEditText(e.target.value)}
+                                rows={3}
+                                className="admin-input-field w-full border border-[var(--line)] bg-[var(--bg)] text-[var(--ink)] rounded-xl p-3 text-xs leading-relaxed focus:outline-none focus:border-[var(--green)] resize-none"
+                              />
+
+                              <div className="flex items-center gap-2 pt-1">
+                                <button
+                                  type="button"
+                                  onClick={() => handleSaveEditNews(item.id)}
+                                  className="flex-1 min-h-[44px] bg-[var(--green)] text-[var(--on)] rounded-xl px-4 py-2.5 text-xs font-extrabold flex items-center justify-center gap-1.5 cursor-pointer shadow-xs"
+                                >
+                                  <Check className="w-4 h-4" />
+                                  <span>حفظ واعتماد التعديل</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setEditingNewsId(null)}
+                                  className="min-h-[44px] border border-[var(--line)] bg-[var(--bg)] rounded-xl px-4 py-2.5 text-xs font-bold text-[var(--mute)] hover:text-[var(--ink)] cursor-pointer"
+                                >
+                                  إلغاء
+                                </button>
+                              </div>
+                            </div>
+                          ) : (
+                            <>
+                              <div className="flex items-center justify-between gap-2 flex-wrap">
+                                <div className="flex items-center gap-2 flex-wrap">
                                   <span
-                                    className={`text-[10px] font-bold px-2 py-0.5 rounded-lg border flex items-center gap-1 ${cat.badgeClass}`}
+                                    className={`text-[10px] font-bold px-2.5 py-1 rounded-lg border flex items-center gap-1 ${cat.badgeClass}`}
                                   >
                                     <span>{cat.emoji}</span>
                                     <span>{cat.name}</span>
                                   </span>
-                                );
-                              })()}
 
-                              <span className="text-xs font-bold text-[var(--gold)] flex items-center gap-1.5">
-                                <span className="w-2 h-2 rounded-full bg-[var(--gold)] animate-pulse" />
-                                <span>المصدر: {item.s}</span>
-                              </span>
-                            </div>
-                            <span className="text-[10px] text-[var(--mute)]">
-                              {new Date(item.timestamp).toLocaleTimeString('ar-DZ', {
-                                hour: '2-digit',
-                                minute: '2-digit',
-                              })}
-                            </span>
-                          </div>
+                                  {/* Status Badge */}
+                                  <span
+                                    className={`text-[10px] px-2.5 py-1 rounded-full font-black border flex items-center gap-1 ${
+                                      isApproved
+                                        ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-600 dark:text-emerald-400'
+                                        : isPending
+                                        ? 'bg-amber-500/15 border-amber-500/30 text-amber-600 dark:text-amber-400'
+                                        : 'bg-rose-500/15 border-rose-500/30 text-rose-600 dark:text-rose-400'
+                                    }`}
+                                  >
+                                    {isApproved ? '🟢 منشور' : isPending ? '⏳ معلّق' : '🔴 مرفوض'}
+                                  </span>
 
-                          <p className="text-xs text-[var(--ink)] leading-relaxed m-0 p-2.5 bg-[var(--bg)] rounded-xl border border-[var(--line)]">
-                            {item.t}
-                          </p>
+                                  <span className="text-xs font-bold text-[var(--ink)]">
+                                    المصدر: {item.s}
+                                  </span>
+                                </div>
 
-                          <div className="flex items-center gap-2 pt-1">
-                            <button
-                              onClick={() => handleApproveNews(item.id)}
-                              className="flex-1 bg-[var(--green)] text-[var(--on)] rounded-xl py-2 text-xs font-bold flex items-center justify-center gap-1.5 shadow-sm cursor-pointer"
-                            >
-                              <Check className="w-3.5 h-3.5" />
-                              <span>اعتماد ونشر للجميع</span>
-                            </button>
+                                <span className="text-[10px] text-[var(--mute)] font-semibold">
+                                  {new Date(item.timestamp).toLocaleString('ar-DZ')}
+                                </span>
+                              </div>
 
-                            <button
-                              onClick={() => handleStartEditNews(item)}
-                              className="px-3 py-2 rounded-xl border border-[var(--line)] bg-[var(--bg)] text-xs text-[var(--mute)] hover:text-[var(--gold)] flex items-center gap-1 cursor-pointer"
-                            >
-                              <Edit3 className="w-3 h-3" />
-                              <span>تعديل</span>
-                            </button>
+                              <p className="text-xs text-[var(--ink)] leading-relaxed m-0 p-3 bg-[var(--bg)] rounded-xl border border-[var(--line)] font-medium">
+                                {item.t}
+                              </p>
 
-                            <button
-                              onClick={() => handleRejectNews(item.id)}
-                              className="px-3 py-2 rounded-xl border border-[var(--bad)]/30 text-[var(--bad)] hover:bg-[var(--bad)]/10 text-xs font-semibold flex items-center gap-1 cursor-pointer"
-                            >
-                              <X className="w-3 h-3" />
-                              <span>رفض</span>
-                            </button>
-                          </div>
-                        </>
-                      )}
-                    </div>
-                  ))
-                )}
+                              {/* Action Buttons: Strict >= 44px on all buttons */}
+                              <div className="flex items-center gap-2 pt-1 flex-wrap">
+                                {!isApproved && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleApproveNews(item.id)}
+                                    className="flex-1 min-h-[44px] bg-[var(--green)] hover:opacity-90 text-[var(--on)] rounded-xl px-4 py-2.5 text-xs font-extrabold flex items-center justify-center gap-1.5 shadow-xs cursor-pointer transition-all"
+                                  >
+                                    <Check className="w-4 h-4" />
+                                    <span>اعتماد ونشر للجميع</span>
+                                  </button>
+                                )}
+
+                                {!isRejected && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleRejectNews(item.id)}
+                                    className="min-h-[44px] px-4 py-2.5 rounded-xl border border-rose-500/40 text-rose-600 dark:text-rose-400 hover:bg-rose-500/10 text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer transition-colors"
+                                  >
+                                    <X className="w-4 h-4" />
+                                    <span>رفض</span>
+                                  </button>
+                                )}
+
+                                <button
+                                  type="button"
+                                  onClick={() => handleStartEditNews(item)}
+                                  className="min-h-[44px] px-4 py-2.5 rounded-xl border border-[var(--line)] bg-[var(--bg)] text-xs font-bold text-[var(--ink)] hover:border-[var(--green)] flex items-center justify-center gap-1.5 cursor-pointer transition-colors"
+                                >
+                                  <Edit3 className="w-3.5 h-3.5" />
+                                  <span>تعديل</span>
+                                </button>
+
+                                <button
+                                  type="button"
+                                  onClick={() => handleDeleteNews(item.id)}
+                                  className="min-h-[44px] px-3.5 py-2.5 rounded-xl border border-rose-500/20 text-rose-500 hover:bg-rose-500/10 text-xs font-bold flex items-center justify-center gap-1 cursor-pointer transition-colors"
+                                  title="حذف نهائي من قاعدة البيانات"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            </>
+                          )}
+                        </div>
+                      );
+                    });
+                  })()}
+                </div>
               </div>
             )}
 
-            {/* TAB: ALL NEWS */}
-            {adminTab === 'all' && (
-              <div className="space-y-3">
-                <div className="flex items-center justify-between px-1">
-                  <b className="text-xs text-[var(--ink)]">قائمة كل الأخبار في النظام</b>
-                  <button
-                    onClick={handleClearAllNews}
-                    className="text-xs text-[var(--bad)] hover:underline font-bold flex items-center gap-1 cursor-pointer"
-                  >
-                    <Trash2 className="w-3 h-3" />
-                    <span>مسح جميع الأخبار دفعة واحدة</span>
-                  </button>
-                </div>
-
-                {news.length === 0 ? (
-                  <div className="p-8 text-center bg-[var(--card)] border border-[var(--line)] rounded-2xl">
-                    <p className="text-xs text-[var(--mute)] m-0">قاعدة الأخبار فارغة حالياً.</p>
+            {/* TAB 5: SECTION 5 - رمز المشرف والأمان (Secret PIN Management) */}
+            {adminTab === 'pin' && (
+              <div className="space-y-4">
+                <div className="bg-[var(--card)] border border-[var(--gold)]/40 rounded-2xl p-5 sm:p-6 space-y-4 shadow-sm">
+                  <div className="flex items-start justify-between gap-3 border-b border-[var(--line)] pb-4">
+                    <div className="space-y-1">
+                      <b className="text-sm text-[var(--ink)] flex items-center gap-2 font-extrabold">
+                        <Lock className="w-5 h-5 text-[var(--gold)]" />
+                        <span>تغيير وتثبيت رمز دخول المشرف (Secret PIN)</span>
+                      </b>
+                      <p className="text-xs text-[var(--mute)] m-0 leading-relaxed">
+                        الرمز الحالي المعتمد هو <code className="bg-[var(--bg)] px-2 py-0.5 rounded text-[var(--gold)] font-mono font-bold">159159159</code> (أو الرمز المخصص الذي حفظته). يتم حفظ الرمز الجديد مشفراً على الخادم ولا يُفقد أبداً عند إعادة التشغيل.
+                      </p>
+                    </div>
+                    <span className="px-3 py-1 rounded-lg text-xs font-bold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 shrink-0">
+                      محمي ومشفّر
+                    </span>
                   </div>
-                ) : (
-                  news.map((item) => (
-                    <div
-                      key={item.id}
-                      className="bg-[var(--card)] border border-[var(--line)] rounded-2xl p-3.5 space-y-2 shadow-sm"
-                    >
-                      {editingNewsId === item.id ? (
-                        <div className="space-y-2.5">
-                          {/* Category Choice */}
-                          <div className="space-y-1">
-                            <span className="text-[10px] text-[var(--mute)] block">التصنيف:</span>
-                            <div className="flex flex-wrap gap-1">
-                              {NEWS_CATEGORIES.map((c) => (
-                                <button
-                                  key={c.id}
-                                  type="button"
-                                  onClick={() => setEditCategory(c.id)}
-                                  className={`px-2 py-1 rounded-lg border text-[11px] font-bold cursor-pointer transition-all ${
-                                    editCategory === c.id
-                                      ? 'bg-[var(--green)] text-white border-[var(--green)]'
-                                      : 'bg-[var(--bg)] border-[var(--line)] text-[var(--ink)]'
-                                  }`}
-                                >
-                                  <span>{c.emoji}</span>
-                                  <span>{c.name}</span>
-                                </button>
-                              ))}
-                            </div>
-                          </div>
 
+                  <form onSubmit={handleChangeAdminPin} className="space-y-4 pt-1">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div className="space-y-1.5">
+                        <label className="text-xs font-bold text-[var(--ink)] block">
+                          الرمز السري الجديد (4 خانات على الأقل):
+                        </label>
+                        <div className="relative">
                           <input
-                            type="text"
-                            value={editSource}
-                            onChange={(e) => setEditSource(e.target.value)}
-                            className="w-full border border-[var(--line)] bg-[var(--bg)] text-[var(--ink)] rounded-xl px-3 py-1.5 text-xs"
+                            type={showNewPinText ? 'text' : 'password'}
+                            value={newPinValue}
+                            onChange={(e) => setNewPinValue(e.target.value)}
+                            placeholder="اكتب الرمز الجديد هنا..."
+                            className="admin-input-field w-full min-h-[44px] border border-[var(--line)] bg-[var(--bg)] text-[var(--ink)] rounded-xl ps-3.5 pe-12 py-2.5 text-sm font-mono font-bold focus:outline-none focus:border-[var(--gold)] relative z-10"
                           />
-                          <textarea
-                            value={editText}
-                            onChange={(e) => setEditText(e.target.value)}
-                            rows={3}
-                            className="w-full border border-[var(--line)] bg-[var(--bg)] text-[var(--ink)] rounded-xl p-3 text-xs"
-                          />
-                          <div className="flex items-center gap-2">
-                            <button
-                              onClick={() => handleSaveEditNews(item.id)}
-                              className="bg-[var(--green)] text-[var(--on)] rounded-xl px-3 py-1.5 text-xs font-bold cursor-pointer"
-                            >
-                              حفظ التعديل
-                            </button>
-                            <button
-                              onClick={() => setEditingNewsId(null)}
-                              className="border border-[var(--line)] rounded-xl px-3 py-1.5 text-xs text-[var(--mute)] cursor-pointer"
-                            >
-                              إلغاء
-                            </button>
-                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setShowNewPinText((prev) => !prev)}
+                            className="absolute end-1.5 top-1/2 -translate-y-1/2 z-20 min-h-[38px] min-w-[38px] flex items-center justify-center rounded-lg p-1.5 text-[var(--mute)] hover:text-[var(--ink)] hover:bg-[var(--card)] cursor-pointer"
+                            title={showNewPinText ? 'إخفاء' : 'إظهار'}
+                          >
+                            {showNewPinText ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                          </button>
                         </div>
-                      ) : (
-                        <>
-                          <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-2">
-                              {(() => {
-                                const cat = getCategoryDetails(item.category);
-                                return (
-                                  <span
-                                    className={`text-[10px] font-bold px-2 py-0.5 rounded-lg border flex items-center gap-1 ${cat.badgeClass}`}
-                                  >
-                                    <span>{cat.emoji}</span>
-                                    <span>{cat.name}</span>
-                                  </span>
-                                );
-                              })()}
+                      </div>
 
-                              <span
-                                className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${
-                                  item.status === 'approved' || !item.status
-                                    ? 'bg-[var(--green)]/20 text-[var(--green)]'
-                                    : 'bg-[var(--gold)]/20 text-[var(--gold)]'
-                                }`}
-                              >
-                                {item.status === 'approved' || !item.status ? 'معتمد' : 'معلق'}
-                              </span>
-                              <span className="text-xs font-bold text-[var(--ink)]">{item.s}</span>
-                            </div>
+                      <div className="space-y-1.5">
+                        <label className="text-xs font-bold text-[var(--ink)] block">
+                          تأكيد الرمز السري الجديد:
+                        </label>
+                        <div className="relative">
+                          <input
+                            type={showNewPinText ? 'text' : 'password'}
+                            value={newPinConfirm}
+                            onChange={(e) => setNewPinConfirm(e.target.value)}
+                            placeholder="أعد كتابة الرمز الجديد للتأكيد..."
+                            className="admin-input-field w-full min-h-[44px] border border-[var(--line)] bg-[var(--bg)] text-[var(--ink)] rounded-xl ps-3.5 pe-12 py-2.5 text-sm font-mono font-bold focus:outline-none focus:border-[var(--gold)] relative z-10"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setShowNewPinText((prev) => !prev)}
+                            className="absolute end-1.5 top-1/2 -translate-y-1/2 z-20 min-h-[38px] min-w-[38px] flex items-center justify-center rounded-lg p-1.5 text-[var(--mute)] hover:text-[var(--ink)] hover:bg-[var(--card)] cursor-pointer"
+                            title={showNewPinText ? 'إخفاء' : 'إظهار'}
+                          >
+                            {showNewPinText ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
 
-                            <div className="flex items-center gap-2">
-                              {item.status === 'pending' && (
-                                <button
-                                  onClick={() => handleApproveNews(item.id)}
-                                  className="text-xs text-[var(--green)] font-bold cursor-pointer"
-                                >
-                                  اعتماد
-                                </button>
-                              )}
-                              <button
-                                onClick={() => handleStartEditNews(item)}
-                                className="text-[11px] text-[var(--mute)] hover:text-[var(--gold)] cursor-pointer"
-                              >
-                                تعديل
-                              </button>
-                              <button
-                                onClick={() => handleRejectNews(item.id)}
-                                className="text-[11px] text-[var(--bad)] cursor-pointer"
-                              >
-                                حذف
-                              </button>
-                            </div>
-                          </div>
-                          <p className="text-xs leading-relaxed text-[var(--ink)] m-0">{item.t}</p>
-                        </>
+                    {changePinToast && (
+                      <div
+                        className={`p-3 rounded-xl text-xs font-bold flex items-center gap-2 border animate-in fade-in ${
+                          changePinToast.type === 'success'
+                            ? 'bg-emerald-500/10 border-emerald-500/25 text-emerald-700 dark:text-emerald-300'
+                            : 'bg-rose-500/10 border-rose-500/25 text-rose-700 dark:text-rose-300'
+                        }`}
+                      >
+                        <span className="text-sm">{changePinToast.type === 'success' ? '✓' : '⚠️'}</span>
+                        <span>{changePinToast.message}</span>
+                      </div>
+                    )}
+
+                    <div className="flex items-center gap-2 pt-2">
+                      <button
+                        type="submit"
+                        disabled={isChangingPin || !newPinValue.trim()}
+                        className="flex-1 min-h-[44px] px-5 py-2.5 rounded-xl bg-[var(--gold)] hover:bg-amber-400 text-black text-xs font-black flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 transition-colors shadow-xs"
+                      >
+                        {isChangingPin ? (
+                          <>
+                            <RefreshCw className="w-4 h-4 animate-spin" />
+                            <span>جارٍ حفظ الرمز الجديد...</span>
+                          </>
+                        ) : (
+                          <>
+                            <Check className="w-4 h-4" />
+                            <span>حفظ وتثبيت الرمز الجديد</span>
+                          </>
+                        )}
+                      </button>
+
+                      {(newPinValue || newPinConfirm) && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setNewPinValue('');
+                            setNewPinConfirm('');
+                            setChangePinToast(null);
+                          }}
+                          className="min-h-[44px] px-4 py-2.5 rounded-xl border border-[var(--line)] bg-[var(--bg)] text-[var(--mute)] hover:text-[var(--ink)] text-xs font-bold cursor-pointer transition-colors"
+                        >
+                          إلغاء
+                        </button>
                       )}
                     </div>
-                  ))
-                )}
+                  </form>
+                </div>
               </div>
             )}
 
@@ -8450,7 +9068,7 @@ export default function App() {
                     <button
                       type="button"
                       onClick={() => playAlertChime('weather', true)}
-                      className="px-2.5 py-1 rounded-lg bg-[var(--bg)] border border-[var(--line)] hover:border-[var(--gold)] text-[11px] font-semibold text-[var(--ink)] flex items-center gap-1 cursor-pointer transition-colors"
+                      className="min-h-[44px] px-3.5 py-2 rounded-xl bg-[var(--bg)] border border-[var(--line)] hover:border-[var(--gold)] text-xs font-bold text-[var(--ink)] flex items-center justify-center gap-1.5 cursor-pointer transition-colors"
                       title="تجربة نغمة الطقس العاجل"
                     >
                       <span>🌪️ نغمة الطقس</span>
@@ -8459,7 +9077,7 @@ export default function App() {
                     <button
                       type="button"
                       onClick={() => playAlertChime('news', true)}
-                      className="px-2.5 py-1 rounded-lg bg-[var(--bg)] border border-[var(--line)] hover:border-[var(--green)] text-[11px] font-semibold text-[var(--ink)] flex items-center gap-1 cursor-pointer transition-colors"
+                      className="min-h-[44px] px-3.5 py-2 rounded-xl bg-[var(--bg)] border border-[var(--line)] hover:border-[var(--green)] text-xs font-bold text-[var(--ink)] flex items-center justify-center gap-1.5 cursor-pointer transition-colors"
                       title="تجربة نغمة الأخبار الجديدة"
                     >
                       <span>📰 نغمة الأخبار</span>
@@ -8467,7 +9085,7 @@ export default function App() {
                   </div>
                 </div>
 
-                <div className="bg-[var(--card)] border border-[var(--line)] rounded-2xl p-3.5 sm:p-4 space-y-2 shadow-sm">
+                <div className="bg-[var(--card)] border border-[var(--line)] rounded-2xl p-4 space-y-2 shadow-sm">
                   <div className="flex items-center justify-between">
                     <div>
                       <b className="text-xs text-[var(--ink)] block">
@@ -8478,14 +9096,15 @@ export default function App() {
                       </p>
                     </div>
                     <button
+                      type="button"
                       onClick={() => setRequireApproval(!requireApproval)}
-                      className={`w-11 h-6 rounded-full transition-colors relative cursor-pointer ${
+                      className={`min-h-[44px] min-w-[56px] px-2 rounded-full transition-colors relative cursor-pointer flex items-center ${
                         requireApproval ? 'bg-[var(--green)]' : 'bg-[var(--line)]'
                       }`}
                     >
                       <span
-                        className={`absolute top-1 w-4 h-4 rounded-full bg-white transition-transform ${
-                          requireApproval ? 'right-1' : 'right-6'
+                        className={`w-6 h-6 rounded-full bg-white transition-transform ${
+                          requireApproval ? 'translate-x-0' : 'translate-x-6 rtl:-translate-x-6'
                         }`}
                       />
                     </button>
@@ -8493,7 +9112,7 @@ export default function App() {
                 </div>
 
                 {/* Android APK & Direct Download Link Manager Card */}
-                <div className="bg-[var(--card)] border border-[var(--line)] rounded-2xl p-4 space-y-2.5 shadow-sm">
+                <div className="bg-[var(--card)] border border-[var(--line)] rounded-2xl p-4 space-y-3 shadow-sm">
                   <div className="flex items-center justify-between gap-2">
                     <div>
                       <b className="text-xs text-[var(--ink)] flex items-center gap-1.5">
@@ -8513,7 +9132,7 @@ export default function App() {
                         setDownloadModalOwnerMode(true);
                         setIsDownloadModalOpen(true);
                       }}
-                      className="flex-1 py-2.5 px-4 rounded-xl bg-[var(--green)] text-[var(--on)] text-xs font-bold flex items-center justify-center gap-2 cursor-pointer transition-opacity hover:opacity-90 shadow-xs"
+                      className="flex-1 min-h-[44px] py-2.5 px-4 rounded-xl bg-[var(--green)] text-[var(--on)] text-xs font-bold flex items-center justify-center gap-2 cursor-pointer transition-opacity hover:opacity-90 shadow-xs"
                     >
                       <RotateCcw className="w-4 h-4" />
                       <span>فتح لوحة حذف وإعادة تعيين APK للأندرويد</span>
@@ -8542,9 +9161,9 @@ export default function App() {
                           }
                         } catch {}
                       }}
-                      className="py-2.5 px-3.5 rounded-xl border border-[var(--bad)] text-[var(--bad)] hover:bg-[var(--bad)]/10 text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer transition-colors"
+                      className="min-h-[44px] py-2.5 px-4 rounded-xl border border-[var(--bad)] text-[var(--bad)] hover:bg-[var(--bad)]/10 text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer transition-colors"
                     >
-                      <Trash2 className="w-3.5 h-3.5" />
+                      <Trash2 className="w-4 h-4" />
                       <span>حذف وإعادة ضبط APK فوراً</span>
                     </button>
 
@@ -8554,7 +9173,7 @@ export default function App() {
                         setDownloadModalOwnerMode(false);
                         setIsDownloadModalOpen(true);
                       }}
-                      className="py-2.5 px-3.5 rounded-xl border border-[var(--line)] bg-[var(--bg)] text-xs font-bold text-[var(--ink)] hover:border-[var(--green)] cursor-pointer transition-colors"
+                      className="min-h-[44px] py-2.5 px-4 rounded-xl border border-[var(--line)] bg-[var(--bg)] text-xs font-bold text-[var(--ink)] hover:border-[var(--green)] cursor-pointer transition-colors"
                     >
                       معاينة نافذة التنزيل
                     </button>
@@ -8566,29 +9185,53 @@ export default function App() {
 
                   <div className="space-y-2">
                     <button
+                      type="button"
                       onClick={handleClearAllNews}
-                      className="w-full py-2.5 px-4 rounded-xl border border-[var(--bad)] text-[var(--bad)] hover:bg-[var(--bad)]/10 text-xs font-bold flex items-center justify-center gap-2 cursor-pointer transition-colors"
+                      className="w-full min-h-[44px] py-2.5 px-4 rounded-xl border border-[var(--bad)] text-[var(--bad)] hover:bg-[var(--bad)]/10 text-xs font-bold flex items-center justify-center gap-2 cursor-pointer transition-colors"
                     >
                       <Trash2 className="w-4 h-4" />
                       <span>مسح جميع أخبار السكان القديمة نهائياً</span>
                     </button>
 
                     <button
+                      type="button"
                       onClick={handleResetToDefaultNews}
-                      className="w-full py-2.5 px-4 rounded-xl border border-[var(--line)] bg-[var(--bg)] text-[var(--ink)] hover:border-[var(--green)] text-xs font-bold flex items-center justify-center gap-2 cursor-pointer transition-colors"
+                      className="w-full min-h-[44px] py-2.5 px-4 rounded-xl border border-[var(--line)] bg-[var(--bg)] text-[var(--ink)] hover:border-[var(--green)] text-xs font-bold flex items-center justify-center gap-2 cursor-pointer transition-colors"
                     >
                       <RefreshCw className="w-4 h-4 text-[var(--green)]" />
                       <span>استعادة الأخبار الرسمية الموثقة الافتراضية</span>
                     </button>
 
                     <button
+                      type="button"
                       onClick={handleClearAllFixes}
-                      className="w-full py-2.5 px-4 rounded-xl border border-[var(--line)] bg-[var(--bg)] text-[var(--mute)] hover:text-[var(--bad)] text-xs font-bold flex items-center justify-center gap-2 cursor-pointer transition-colors"
+                      className="w-full min-h-[44px] py-2.5 px-4 rounded-xl border border-[var(--line)] bg-[var(--bg)] text-[var(--mute)] hover:text-[var(--bad)] text-xs font-bold flex items-center justify-center gap-2 cursor-pointer transition-colors"
                     >
                       <Trash2 className="w-4 h-4" />
                       <span>مسح جميع تصحيحات السكان السابقة</span>
                     </button>
                   </div>
+                </div>
+
+                {/* Direct Link to Dedicated PIN Section */}
+                <div className="bg-[var(--card)] border border-[var(--gold)]/30 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-sm">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-amber-500/10 text-amber-500 flex items-center justify-center shrink-0">
+                      <Lock className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <b className="text-xs text-[var(--ink)] block font-extrabold">رمز دخول المشرف (Secret PIN)</b>
+                      <p className="text-[11px] text-[var(--mute)] m-0">تغيير رمز المرور الخاص بمدير النظام وتثبيته دائماً في ملفات الخادم</p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setAdminTab('pin')}
+                    className="min-h-[44px] px-5 py-2.5 rounded-xl bg-[var(--gold)] hover:bg-amber-400 text-black text-xs font-black flex items-center justify-center gap-2 cursor-pointer transition-all shadow-xs"
+                  >
+                    <span>فتح جهة رمز المشرف</span>
+                    <span>←</span>
+                  </button>
                 </div>
               </div>
             )}
@@ -8904,6 +9547,109 @@ export default function App() {
         onClose={() => setIsMemoryModalOpen(false)}
         userId={firebaseUser?.uid || 'default_user'}
       />
+
+      {/* Admin PIN Login Modal */}
+      {showPinModal && (
+        <div
+          onClick={(e) => {
+            if (e.target === e.currentTarget) {
+              setShowPinModal(false);
+              setPinInput('');
+              setPinError(false);
+            }
+          }}
+          className="admin-pin-modal fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in"
+        >
+          <div className="bg-[var(--card)] border border-[var(--line)] rounded-3xl p-6 max-w-sm w-full shadow-2xl space-y-4 text-center relative overflow-hidden">
+            <button
+              type="button"
+              onClick={() => {
+                setShowPinModal(false);
+                setPinInput('');
+                setPinError(false);
+              }}
+              className="absolute top-3 start-3 min-h-[44px] min-w-[44px] flex items-center justify-center rounded-xl text-[var(--mute)] hover:text-[var(--ink)] hover:bg-[var(--bg)] transition-colors cursor-pointer z-20"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            {/* Element 5: Official App Icon */}
+            <div className="w-14 h-14 rounded-2xl overflow-hidden flex items-center justify-center mx-auto shadow-md border border-[var(--line)] bg-[#031752] shrink-0">
+              <img
+                src="/icon.svg"
+                alt={t.appName}
+                referrerPolicy="no-referrer"
+                className="w-full h-full object-cover"
+              />
+            </div>
+
+            {/* Element 1: Title without the deleted paragraph */}
+            <div>
+              <h3 className="text-base font-bold text-[var(--ink)] m-0">بوابة المالك والمشرف</h3>
+            </div>
+
+            <form onSubmit={handleAdminLogin} className="space-y-3.5 pt-2">
+              <div className="relative">
+                {/* Element 2: Input with placeholder "ادخل الرمز" and guaranteed text visibility */}
+                <input
+                  type={showPinText ? 'text' : 'password'}
+                  inputMode="numeric"
+                  autoComplete="off"
+                  value={pinInput}
+                  onChange={(e) => {
+                    setPinInput(e.target.value);
+                    setPinError(false);
+                  }}
+                  placeholder="ادخل الرمز"
+                  autoFocus
+                  className={`admin-input-field w-full min-h-[48px] px-12 py-3 text-base text-center font-mono font-bold rounded-xl bg-[var(--bg)] border-2 text-[var(--ink)] focus:outline-none transition-all relative z-10 ${
+                    pinError
+                      ? 'border-rose-500 ring-2 ring-rose-500/20'
+                      : 'border-[var(--line)] focus:border-[var(--green)]'
+                  }`}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPinText((prev) => !prev)}
+                  className="absolute end-1.5 top-1/2 -translate-y-1/2 z-20 min-h-[40px] min-w-[40px] flex items-center justify-center rounded-lg p-1.5 text-[var(--mute)] hover:text-[var(--ink)] hover:bg-[var(--card)] cursor-pointer"
+                  title={showPinText ? 'إخفاء الرمز' : 'إظهار الرمز'}
+                >
+                  {showPinText ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
+
+              {pinError && (
+                <p className="text-xs font-bold text-rose-500 m-0 animate-in fade-in">
+                  ⚠️ {pinErrorMessage || 'رمز المشرف غير صحيح. الرمز المعتمد هو 159159159'}
+                </p>
+              )}
+
+              <div className="flex gap-2 pt-1">
+                {/* Element 3: Green button with text "دخول" only */}
+                <button
+                  type="submit"
+                  disabled={!pinInput.trim()}
+                  className="flex-1 min-h-[44px] py-2.5 px-4 rounded-xl bg-[var(--green)] text-white font-bold text-xs hover:opacity-90 disabled:opacity-50 transition-all shadow-sm cursor-pointer"
+                >
+                  دخول
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowPinModal(false);
+                    setPinInput('');
+                    setPinError(false);
+                    setPinErrorMessage('');
+                  }}
+                  className="min-h-[44px] py-2.5 px-4 rounded-xl border border-[var(--line)] bg-[var(--bg)] text-[var(--mute)] hover:text-[var(--ink)] font-bold text-xs cursor-pointer"
+                >
+                  إلغاء
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

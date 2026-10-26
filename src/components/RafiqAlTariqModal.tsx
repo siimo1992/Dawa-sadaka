@@ -148,8 +148,8 @@ export const RafiqAlTariqModal: React.FC<RafiqAlTariqModalProps> = ({
   const [isHelpOpen, setIsHelpOpen] = useState(false);
   const [openMenuRideId, setOpenMenuRideId] = useState<string | number | null>(null);
 
-  // Owner / Admin Mode & Control Panel
-  const [isAdminMode, setIsAdminMode] = useState<boolean>(isAdminLoggedIn);
+  // Owner / Admin Mode & Control Panel (strictly bound to Owner Control Panel authentication)
+  const isAdminMode = isAdminLoggedIn;
   const [isAdminPanelOpen, setIsAdminPanelOpen] = useState(false);
   const [adminTab, setAdminTab] = useState<'drivers' | 'queue'>('drivers');
 
@@ -1194,25 +1194,6 @@ export const RafiqAlTariqModal: React.FC<RafiqAlTariqModalProps> = ({
             })
           )}
         </div>
-
-        {/* Owner / Admin Mode Preview Toggle */}
-        <button
-          className="devtog"
-          id="aBtn"
-          type="button"
-          aria-pressed={isAdminMode}
-          onClick={() => {
-            const next = !isAdminMode;
-            setIsAdminMode(next);
-            if (!next) setIsAdminPanelOpen(false);
-            showToast(
-              next ? 'وضع المالك والمشرف مفعّل' : 'وضع المالك والمشرف متوقف'
-            );
-          }}
-        >
-          <Icon name="shieldok" />
-          <span>معاينة: صلاحيات المالك والمشرف</span>
-        </button>
       </main>
 
       {/* Publish / Edit Ride Dialog */}

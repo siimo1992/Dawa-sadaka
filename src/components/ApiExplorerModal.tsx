@@ -386,7 +386,7 @@ export const ApiExplorerModal: React.FC<ApiExplorerModalProps> = ({
                   value={requestBodyText}
                   onChange={(e) => setRequestBodyText(e.target.value)}
                   rows={5}
-                  className="w-full font-mono text-xs bg-slate-950 text-slate-100 p-3 rounded-xl border border-slate-800 focus:outline-none focus:border-[var(--green)] leading-relaxed"
+                  className="admin-input-field w-full font-mono text-xs bg-[var(--bg)] text-[var(--ink)] p-3 rounded-xl border border-[var(--line)] focus:outline-none focus:border-[var(--green)] leading-relaxed"
                   dir="ltr"
                 />
               </div>

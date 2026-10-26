@@ -6,6 +6,9 @@ import path from 'path';
 import { performance } from 'node:perf_hooks';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 import OpenAI from 'openai';
 import { GoogleGenAI } from '@google/genai';
 
@@ -64,9 +67,11 @@ import {
   buildClearEngineErrorMessage,
   type EngineFailureKind,
   requireAdmin as fixesRequireAdmin,
+  rateLimit,
 } from './fixes.ts';
 import { registerTravelCompanionRoutes } from './travelCompanion.ts';
 import { registerNewsHubRoutes } from './newsHub.ts';
+import { registerStorePriceListRoutes } from './src/server/storePriceListEngine.ts';
 import {
   registerTidikeltAssistantRoutes,
   preprocessAssistantRequest,
@@ -84,16 +89,19 @@ dotenv.config();
 
 // Ensure ADMIN_TOKEN has a default in the live runtime if not explicitly set in .env
 if (!process.env.ADMIN_TOKEN) {
-  process.env.ADMIN_TOKEN = process.env.OWNER_PIN || '159159';
+  process.env.ADMIN_TOKEN = process.env.OWNER_PIN || '159159159';
 }
 
-import rateLimit from 'express-rate-limit';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+import cookieParser from 'cookie-parser';
+import { mountAdmin } from './src/server/adminAuth.ts';
 
 const app = express();
+app.set('trust proxy', 1);
 const PORT = Number(process.env.PORT) || 3000;
+
+app.use(cookieParser());
+app.use(express.json({ limit: '25mb' }));
+mountAdmin(app);
 
 // Apply unified hardening: security headers, rate limits, adminGate, bodySizeGate, json parser, stripClientControlledPrompts
 applyFixes(app);
@@ -106,17 +114,11 @@ export const requireAdmin = fixesRequireAdmin;
 export const aiRateLimiter = rateLimit({
   windowMs: 60 * 1000, // 1 minute
   max: 30, // 30 requests per minute per IP
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { error: 'تم تجاوز الحد المسموح للطلبات الذكية في الدقيقة. يرجى الانتظار قليلاً.' },
 });
 
 export const heavyAiRateLimiter = rateLimit({
   windowMs: 60 * 1000, // 1 minute
   max: 10, // 10 heavy generation requests per minute per IP (TTS / Image)
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { error: 'تم تجاوز الحد المسموح للميزات الثقيلة (صور أو صوت). يرجى المحاولة بعد قليل.' },
 });
 
 // Centralized verified Gemini model constants (verified with @google/genai runtime)
@@ -148,17 +150,35 @@ registerRafiqAlTariqRoutes(app, ai);
 registerApkReleaseRoutes(app);
 registerTravelCompanionRoutes(app, ai);
 registerNewsHubRoutes(app, ai);
+registerStorePriceListRoutes(app, ai);
 
-// Health check endpoint
+// Health check endpoint (لا تكشف المفاتيح)
 app.get('/api/health', (_req: Request, res: Response) => {
-  const deepseek = getDeepSeekStatus();
-  res.json({
-    status: 'ok',
-    hasKey: Boolean(process.env.GEMINI_API_KEY),
-    hasDeepSeekKey: deepseek.configured,
-    deepSeekStatus: deepseek,
-    timestamp: new Date().toISOString(),
-  });
+  return res.json({ status: 'ok' });
+});
+
+// الطقس الحي. لا تسمّه ONM إلا إذا المصدر فعلاً ONM.
+app.get('/api/weather', async (req: Request, res: Response) => {
+  try {
+    const lat = Number(req.query.lat || 27.1935);
+    const lon = Number(req.query.lon || 2.4607);
+    if (isNaN(lat) || isNaN(lon) || Math.abs(lat) > 90 || Math.abs(lon) > 180) {
+      return res.status(400).json({ error: 'bad_coordinates' });
+    }
+    const url = new URL('https://api.open-meteo.com/v1/forecast');
+    url.searchParams.set('latitude', String(lat));
+    url.searchParams.set('longitude', String(lon));
+    url.searchParams.set('current', 'temperature_2m,wind_speed_10m,weather_code,uv_index');
+    url.searchParams.set('daily', 'temperature_2m_max,temperature_2m_min,weather_code,wind_speed_10m_max');
+    url.searchParams.set('forecast_days', '5');
+    url.searchParams.set('timezone', 'Africa/Algiers');
+    const r = await fetch(url.toString());
+    if (!r.ok) return res.status(502).json({ error: 'weather_unavailable' });
+    const data = await r.json();
+    return res.json({ source: 'open-meteo', ...data });
+  } catch {
+    return res.status(502).json({ error: 'weather_unavailable' });
+  }
 });
 
 // Dedicated Server-Side DeepSeek Chat Endpoint with Silent Failover to Gemini on 402/Missing Key

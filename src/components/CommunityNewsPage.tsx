@@ -14,7 +14,7 @@ export interface CommunityNewsItem {
   t: string; // text
   category?: string;
   timestamp: number;
-  status: 'approved' | 'pending';
+  status: 'approved' | 'pending' | 'rejected';
   authorName?: string;
   authorPhotoUrl?: string;
   neighborhood?: string;
@@ -238,6 +238,7 @@ const cleanName = (n: string): string =>
 export const CommunityNewsPage: React.FC<CommunityNewsPageProps> = ({
   setNews,
   isAdminLoggedIn,
+  onOpenAdmin,
   onBackToChat,
   onSyncNewsToCloud,
   onOpenRafiq,
@@ -265,8 +266,8 @@ export const CommunityNewsPage: React.FC<CommunityNewsPageProps> = ({
   const [composerSource, setComposerSource] = useState('');
   const [attachedFile, setAttachedFile] = useState<File | null>(null);
 
-  // Admin & Menu state
-  const [isAdminMode, setIsAdminMode] = useState<boolean>(isAdminLoggedIn);
+  // Admin & Menu state (strictly controlled by Owner Control Panel login)
+  const isAdminMode = isAdminLoggedIn;
   const [isAdminPanelOpen, setIsAdminPanelOpen] = useState(false);
   const [adminTab, setAdminTab] = useState<'users' | 'queue'>('users');
   const [openMenuPostId, setOpenMenuPostId] = useState<number | null>(null);
@@ -725,7 +726,7 @@ export const CommunityNewsPage: React.FC<CommunityNewsPageProps> = ({
               TA
             </button>
             <div className="brand-info">
-              <span className="brand-title">محليات</span>
+              <span className="brand-title">كاش ما تعرف · محليات</span>
               <span className="loc" id="loc" title="أخبار ومستجدات المجتمع المحلي">
                 <svg className="i i-12 text-[var(--green)]" aria-hidden="true">
                   <use href="#i-pin" />
@@ -736,18 +737,20 @@ export const CommunityNewsPage: React.FC<CommunityNewsPageProps> = ({
           </div>
 
           <div className="bar-actions">
-            <button
-              className="ib"
-              id="pBtn"
-              type="button"
-              aria-label="لوحة التحكم"
-              hidden={!isAdminMode}
-              onClick={() => setIsAdminPanelOpen(true)}
-            >
-              <svg className="i">
-                <use href="#i-panel" />
-              </svg>
-            </button>
+            {isAdminMode && (
+              <button
+                className="ib"
+                id="pBtn"
+                type="button"
+                aria-label="لوحة التحكم"
+                title="لوحة تحكم المشرف والمالك"
+                onClick={() => setIsAdminPanelOpen(true)}
+              >
+                <svg className="i">
+                  <use href="#i-panel" />
+                </svg>
+              </button>
+            )}
 
             <button
               className="ib"
@@ -1335,30 +1338,10 @@ export const CommunityNewsPage: React.FC<CommunityNewsPageProps> = ({
             })
           )}
         </div>
-
-        {/* Admin Mode Preview Toggle */}
-        <button
-          className="devtog"
-          id="aBtn"
-          type="button"
-          aria-pressed={isAdminMode}
-          onClick={() => {
-            const next = !isAdminMode;
-            setIsAdminMode(next);
-            setEditingPostId(null);
-            if (!next) setIsAdminPanelOpen(false);
-            showToast(next ? 'وضع المشرف مفعّل (معاينة)' : 'وضع المشرف متوقف');
-          }}
-        >
-          <svg className="i i-16" aria-hidden="true">
-            <use href="#i-shieldok" />
-          </svg>
-          <span>معاينة: وضع المشرف</span>
-        </button>
       </div>
 
       {/* Admin Control Panel Modal */}
-      {isAdminPanelOpen && (
+      {isAdminMode && isAdminPanelOpen && (
         <div
           className="dlg-backdrop"
           onClick={(e) => {
@@ -1371,9 +1354,19 @@ export const CommunityNewsPage: React.FC<CommunityNewsPageProps> = ({
                 <svg className="i" aria-hidden="true">
                   <use href="#i-panel" />
                 </svg>
-                <span>لوحة التحكم</span>
+                <span>لوحة تحكم المشرف</span>
                 <button
-                  className="ib ms-auto"
+                  type="button"
+                  className="chip ms-auto"
+                  onClick={() => {
+                    setIsAdminPanelOpen(false);
+                    onOpenAdmin();
+                  }}
+                >
+                  بوابة المالك الشاملة
+                </button>
+                <button
+                  className="ib"
                   id="aClose"
                   type="button"
                   aria-label="إغلاق"

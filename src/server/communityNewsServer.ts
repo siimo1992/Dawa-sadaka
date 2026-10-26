@@ -721,6 +721,7 @@ export class JsonFileNewsStore implements NewsStore {
 // ============================================================================
 
 import { CloudSqlNewsStore } from './cloudSqlNewsStore.ts';
+import { readSession, requireAdmin } from './adminAuth.ts';
 
 export function registerCommunityNewsRoutes(app: express.Express, ai: GoogleGenAI) {
   const dataDir = path.join(process.cwd(), 'data');
@@ -729,10 +730,11 @@ export function registerCommunityNewsRoutes(app: express.Express, ai: GoogleGenA
     : new JsonFileNewsStore(dataDir);
   const moderator = new GeminiTextModerator(ai);
 
-  // Helper to extract actor from request headers
+  // Helper to extract actor from verified session cookie or token (Never trust x-user-role header)
   function getActor(req: Request): Actor {
-    const authHeader = req.headers['authorization'];
-    const customRole = req.headers['x-user-role'];
+    const rawHeader = req.headers['x-admin-session'] || req.headers['authorization'];
+    const headerToken = typeof rawHeader === 'string' ? rawHeader.replace(/^Bearer\s+/i, '').trim() : undefined;
+    const session = readSession(req.cookies?.tidikelt_admin || headerToken);
     const userIdHeader = req.headers['x-user-id'];
     const userNameHeader = req.headers['x-user-name'];
 
@@ -741,8 +743,9 @@ export function registerCommunityNewsRoutes(app: express.Express, ai: GoogleGenA
       : 'guest_' + (req.ip || '127.0.0.1').replace(/[^a-zA-Z0-9]/g, '_');
 
     let role: Role = 'member';
-    if (customRole === 'owner') role = 'owner';
-    else if (customRole === 'moderator') role = 'moderator';
+    if (session && session.role === 'owner') {
+      role = 'owner';
+    }
 
     return {
       id,
@@ -851,19 +854,19 @@ export function registerCommunityNewsRoutes(app: express.Express, ai: GoogleGenA
   });
 
   // 6. GET /api/community-news/admin/posts: List all posts for moderation
-  app.get('/api/community-news/admin/posts', async (req: Request, res: Response) => {
+  app.get('/api/community-news/admin/posts', requireAdmin, async (req: Request, res: Response) => {
     try {
       const actor = getActor(req);
       requireRole(actor, 'moderator', 'owner');
       const posts = await store.listAllPosts();
       return res.json({ posts });
     } catch (err: any) {
-      return res.status(403).json({ error: err.message || 'غير مصرح لك بالوصول لإدارة الأخبار' });
+      return res.status(401).json({ error: err.message || 'غير مصرح لك بالوصول لإدارة الأخبار' });
     }
   });
 
   // 7. POST /api/community-news/admin/:id/review: Approve or reject post
-  app.post('/api/community-news/admin/:id/review', async (req: Request, res: Response) => {
+  app.post('/api/community-news/admin/:id/review', requireAdmin, async (req: Request, res: Response) => {
     try {
       const actor = getActor(req);
       const postId = req.params.id;
@@ -877,7 +880,7 @@ export function registerCommunityNewsRoutes(app: express.Express, ai: GoogleGenA
   });
 
   // 8. POST /api/community-news/admin/verify-org: Decide organization verification
-  app.post('/api/community-news/admin/verify-org', async (req: Request, res: Response) => {
+  app.post('/api/community-news/admin/verify-org', requireAdmin, async (req: Request, res: Response) => {
     try {
       const actor = getActor(req);
       const { requestId, decision, note } = req.body || {};
