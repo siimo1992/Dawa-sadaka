@@ -89,10 +89,15 @@ const IMAGE_GEN = /^\/api\/generate-image$/;
 /* ───────────────────────── 3) حدود الحجم ───────────────────────── */
 
 const BIG_BODY_ALLOWED = /^\/api\/(ain-salah\/ask|tidikelt\/ask|rag\/upload-document|files\/(analyze|generate))$/;
+const APK_UPLOAD_ROUTE = /^\/api\/apk\/upload$/;
 
 export const bodySizeGate: RequestHandler = (req, res, next) => {
   const len = Number(req.headers['content-length'] || 0);
-  const limit = BIG_BODY_ALLOWED.test(req.path) ? 26 * 1024 * 1024 : 512 * 1024;
+  const limit = APK_UPLOAD_ROUTE.test(req.path)
+    ? 255 * 1024 * 1024
+    : BIG_BODY_ALLOWED.test(req.path)
+    ? 26 * 1024 * 1024
+    : 512 * 1024;
   if (len > limit) {
     res.status(413).json({ error: 'الطلب أكبر من الحد المسموح.' });
     return;

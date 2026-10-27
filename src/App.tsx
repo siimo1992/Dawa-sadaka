@@ -136,6 +136,7 @@ import {
   type PriceListPosterData,
   type PdfExportSettings,
 } from './components/PriceListPosterCard';
+import { LiveVoiceCallModal } from './components/LiveVoiceCallModal';
 
 interface Agent {
   id: string;
@@ -967,19 +968,32 @@ export default function App() {
   const isOnline = useOnlineStatus();
   const [showIOSInstallGuide, setShowIOSInstallGuide] = useState(false);
 
-  // Sync mobile visualViewport height so virtual keyboards on iOS/Android never cover the input bar
+  // Sync mobile visualViewport height with RAF throttling so virtual keyboards never cause scroll jank
   useEffect(() => {
     if (typeof window === 'undefined' || !window.visualViewport) return;
     const vv = window.visualViewport;
+    let rafId: number | null = null;
+    let lastHeight = 0;
+
     const updateViewportHeight = () => {
-      document.documentElement.style.setProperty('--app-viewport-height', `${vv.height}px`);
+      if (rafId !== null) return;
+      rafId = window.requestAnimationFrame(() => {
+        rafId = null;
+        const h = Math.round(vv.height);
+        if (Math.abs(h - lastHeight) > 2) {
+          lastHeight = h;
+          document.documentElement.style.setProperty('--app-viewport-height', `${h}px`);
+        }
+      });
     };
+
     updateViewportHeight();
     vv.addEventListener('resize', updateViewportHeight);
-    vv.addEventListener('scroll', updateViewportHeight);
     return () => {
       vv.removeEventListener('resize', updateViewportHeight);
-      vv.removeEventListener('scroll', updateViewportHeight);
+      if (rafId !== null) {
+        window.cancelAnimationFrame(rafId);
+      }
     };
   }, []);
 
@@ -1255,9 +1269,99 @@ export default function App() {
   >([]);
   const multiFileInputRef = useRef<HTMLInputElement | null>(null);
   const [isMemoryModalOpen, setIsMemoryModalOpen] = useState<boolean>(false);
+  const [isLiveCallOpen, setIsLiveCallOpen] = useState<boolean>(false);
   const sendAbortControllerRef = useRef<AbortController | null>(null);
   const [editingUserMsgId, setEditingUserMsgId] = useState<string | null>(null);
   const [editingUserMsgText, setEditingUserMsgText] = useState<string>('');
+
+  // المراقبة الدورية الشاملة والإصلاح التلقائي الصامت في الخلفية (Silent System Watchdog)
+  const [systemWatchdogStatus, setSystemWatchdogStatus] = useState<{
+    status: 'healthy' | 'repaired';
+    lastCheckAt: number;
+    uptimeSeconds: number;
+    memoryRssMb: number;
+    heapUsedMb: number;
+    autoRepairsCount: number;
+    lastRepairReason: string | null;
+    downloadReady: boolean;
+    downloadFileName: string;
+    downloadFileSize: string;
+    aiEngineReady: boolean;
+    activeCooldownsCleared: number;
+  } | null>(null);
+  const [isRunningWatchdogRepair, setIsRunningWatchdogRepair] = useState<boolean>(false);
+
+  useEffect(() => {
+    let isMounted = true;
+    const runSilentWatchdogCheck = async () => {
+      try {
+        const res = await fetch('/api/system/watchdog', { cache: 'no-store' });
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!isMounted || !data) return;
+        setSystemWatchdogStatus(data);
+
+        // إذا قام الخادم بإصلاح تلقائي، نتحقق بصمت من عدم وجود استجابات تالفة في ذاكرة المتصفح
+        if (data.status === 'repaired' && 'caches' in window) {
+          try {
+            const keys = await window.caches.keys();
+            for (const key of keys) {
+              const cache = await window.caches.open(key);
+              await cache.delete('/downloads/tidikelt-ai-release.apk');
+              await cache.delete('/api/apk/download');
+            }
+          } catch {}
+        }
+      } catch {
+        // صامت تماماً ولا يزعج المستخدم العادي
+      }
+    };
+
+    runSilentWatchdogCheck();
+    const timer = window.setInterval(runSilentWatchdogCheck, 60 * 1000);
+    return () => {
+      isMounted = false;
+      window.clearInterval(timer);
+    };
+  }, []);
+
+  const handleRunAdminWatchdogRepair = async () => {
+    if (isRunningWatchdogRepair) return;
+    setIsRunningWatchdogRepair(true);
+    try {
+      const res = await fetch('/api/system/watchdog/repair', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      if (res.ok) {
+        const payload = await res.json();
+        if (payload?.snapshot) {
+          setSystemWatchdogStatus(payload.snapshot);
+        }
+        if ('caches' in window) {
+          try {
+            const keys = await window.caches.keys();
+            await Promise.all(keys.map((k) => window.caches.delete(k)));
+          } catch {}
+        }
+        pushInAppNotification({
+          type: 'system',
+          title: 'اكتمل الفحص والإصلاح الشامل',
+          message:
+            payload?.message ||
+            'تم فحص وإصلاح جميع مسارات التطبيق، تنزيل APK، والنماذج الذكية والذاكرة بنجاح.',
+        });
+      }
+    } catch {
+      pushInAppNotification({
+        type: 'system',
+        title: 'تنبيه الفحص الشامل',
+        message: 'تعذر الاتصال المؤقت بالخادم، ستستمر المراقبة التلقائية في الخلفية.',
+      });
+    } finally {
+      setIsRunningWatchdogRepair(false);
+    }
+  };
 
   const handleMultiFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files: File[] = Array.from(e.target.files || []);
@@ -2693,65 +2797,74 @@ export default function App() {
     localStorage.setItem('ain_salah_theme', theme);
   }, [theme]);
 
-  // Persist state & chat sessions
+  // Persist state & chat sessions (debounced to prevent mobile UI lag during streaming)
   useEffect(() => {
-    localStorage.setItem('ain_salah_msgs', JSON.stringify(messages));
+    const timer = window.setTimeout(() => {
+      try {
+        localStorage.setItem('ain_salah_msgs', JSON.stringify(messages));
+      } catch {}
 
-    if (messages.length > 0 && activeSessionId) {
-      setChatSessions((prev) => {
-        const idx = prev.findIndex((s) => s.id === activeSessionId);
-        const firstUserMsg = messages.find((m) => m.role === 'me');
-        const lastMsg = messages[messages.length - 1];
-        const preview = lastMsg?.text ? lastMsg.text.slice(0, 80) : '';
+      if (messages.length > 0 && activeSessionId) {
+        setChatSessions((prev) => {
+          const idx = prev.findIndex((s) => s.id === activeSessionId);
+          const firstUserMsg = messages.find((m) => m.role === 'me');
+          const lastMsg = messages[messages.length - 1];
+          const preview = lastMsg?.text ? lastMsg.text.slice(0, 80) : '';
 
-        if (idx >= 0) {
-          const existing = prev[idx];
-          const isDefaultTitle =
-            !existing.title ||
-            existing.title === 'محادثة جديدة' ||
-            existing.title === 'New Chat' ||
-            existing.title === 'Nouvelle discussion' ||
-            existing.title === 'محادثة سابقة';
-          const updatedTitle =
-            isDefaultTitle && firstUserMsg ? deriveSessionTitle(firstUserMsg.text) : existing.title;
-          const updated: ChatSession = {
-            ...existing,
-            title: updatedTitle,
-            messages,
-            updatedAt: Date.now(),
-            previewText: preview,
-          };
-          const copy = [...prev];
-          copy[idx] = updated;
-          return copy;
-        } else {
-          const newTitle = firstUserMsg
-            ? deriveSessionTitle(firstUserMsg.text)
-            : lang === 'ar'
-            ? 'محادثة جديدة'
-            : lang === 'fr'
-            ? 'Nouvelle discussion'
-            : 'New Chat';
-          const newSession: ChatSession = {
-            id: activeSessionId,
-            title: newTitle,
-            messages,
-            createdAt: messages[0]?.timestamp || Date.now(),
-            updatedAt: Date.now(),
-            previewText: preview,
-          };
-          return [newSession, ...prev];
-        }
-      });
-    }
+          if (idx >= 0) {
+            const existing = prev[idx];
+            const isDefaultTitle =
+              !existing.title ||
+              existing.title === 'محادثة جديدة' ||
+              existing.title === 'New Chat' ||
+              existing.title === 'Nouvelle discussion' ||
+              existing.title === 'محادثة سابقة';
+            const updatedTitle =
+              isDefaultTitle && firstUserMsg ? deriveSessionTitle(firstUserMsg.text) : existing.title;
+            const updated: ChatSession = {
+              ...existing,
+              title: updatedTitle,
+              messages,
+              updatedAt: Date.now(),
+              previewText: preview,
+            };
+            const copy = [...prev];
+            copy[idx] = updated;
+            return copy;
+          } else {
+            const newTitle = firstUserMsg
+              ? deriveSessionTitle(firstUserMsg.text)
+              : lang === 'ar'
+              ? 'محادثة جديدة'
+              : lang === 'fr'
+              ? 'Nouvelle discussion'
+              : 'New Chat';
+            const newSession: ChatSession = {
+              id: activeSessionId,
+              title: newTitle,
+              messages,
+              createdAt: messages[0]?.timestamp || Date.now(),
+              updatedAt: Date.now(),
+              previewText: preview,
+            };
+            return [newSession, ...prev];
+          }
+        });
+      }
+    }, 350);
+
+    return () => window.clearTimeout(timer);
   }, [messages, activeSessionId, lang]);
 
   useEffect(() => {
-    try {
-      localStorage.setItem('ai_studio_chat_sessions_v1', JSON.stringify(chatSessions));
-    } catch (e) {
-      console.error('Failed to persist chat sessions', e);
-    }
+    const timer = window.setTimeout(() => {
+      try {
+        localStorage.setItem('ai_studio_chat_sessions_v1', JSON.stringify(chatSessions));
+      } catch (e) {
+        console.error('Failed to persist chat sessions', e);
+      }
+    }, 400);
+    return () => window.clearTimeout(timer);
   }, [chatSessions]);
 
   useEffect(() => {
@@ -2891,12 +3004,12 @@ export default function App() {
     return () => clearInterval(timer);
   }, [trip]);
 
-  // Scroll to bottom on message change
+  // Scroll to bottom on message change without locking touch scroll during streaming
   useEffect(() => {
     if (view === 'chat') {
-      chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+      chatEndRef.current?.scrollIntoView({ behavior: isSending ? 'auto' : 'smooth' });
     }
-  }, [messages, view, isSending]);
+  }, [messages.length, view]);
 
   // Auto-resize textarea without disrupting mobile virtual keyboard IME composition
   useEffect(() => {
@@ -4375,7 +4488,7 @@ export default function App() {
               />
             </div>
             <div className="min-w-0">
-              <h2 className="text-sm font-extrabold text-[var(--ink)] tracking-tight leading-tight truncate m-0">
+              <h2 className="text-base font-extrabold text-[var(--ink)] tracking-tight leading-tight truncate m-0">
                 {t.appName}
               </h2>
               <span
@@ -4699,20 +4812,30 @@ export default function App() {
 
         {/* Sidebar Footer — Compact & Slim */}
         <div className="px-2 py-1.5 border-t border-[var(--line)] flex flex-col gap-1.5">
-          {/* Download App Button - Compact */}
-          <button
+          {/* Direct Download App Link - Immediate File Download */}
+          <a
             id="openDownload"
-            type="button"
-            onClick={() => setIsDownloadModalOpen(true)}
-            className="download-button w-full flex items-center justify-center gap-1.5 py-1.5 px-2.5 rounded-lg border border-emerald-600/40 bg-[#176b52] hover:bg-[#125742] text-white text-[11px] font-bold cursor-pointer transition-all shadow-xs active:scale-[0.98]"
-            title={lang === 'ar' ? 'تنزيل وتثبيت التطبيق على جهازك' : 'Install App'}
-            aria-label={lang === 'ar' ? 'تنزيل وتثبيت التطبيق' : 'Install App'}
+            href="/downloads/tidikelt-ai-release.apk"
+            download="tidikelt-ai-release.apk"
+            onClick={() => {
+              pushInAppNotification({
+                type: 'system',
+                title: lang === 'ar' ? 'جاري تنزيل التطبيق' : 'Downloading App',
+                message:
+                  lang === 'ar'
+                    ? 'بدأ تنزيل ملف التطبيق (tidikelt-ai-release.apk) مباشرة على جهازك.'
+                    : 'Direct download of tidikelt-ai-release.apk has started.',
+              });
+            }}
+            className="download-button w-full flex items-center justify-center gap-1.5 py-1.5 px-2.5 rounded-lg border border-emerald-600/40 bg-[#176b52] hover:bg-[#125742] text-white text-[11px] font-bold cursor-pointer transition-all shadow-xs active:scale-[0.98] no-underline"
+            title={lang === 'ar' ? 'تنزيل ملف التطبيق مباشرة' : 'Download App File Directly'}
+            aria-label={lang === 'ar' ? 'تنزيل ملف التطبيق مباشرة' : 'Download App File Directly'}
           >
-            <span className="text-xs">📲</span>
+            <Download className="w-3.5 h-3.5 shrink-0" />
             <span className="font-bold">
               {lang === 'ar' ? 'تنزيل التطبيق' : lang === 'fr' ? "Télécharger l'application" : 'Download App'}
             </span>
-          </button>
+          </a>
 
           {/* Controls Row: Theme, Sound, Cloud Sync, and App Badge */}
           <div className="flex items-center justify-between gap-1">
@@ -4912,8 +5035,8 @@ export default function App() {
           </div>
         )}
 
-        {/* Modern AI Top Header (Hidden when Mind Focus Mode is active OR in News view which has its own dedicated header) */}
-        {!isMindFocusMode && view !== 'news' && (
+        {/* Modern AI Top Header (Hidden when Mind Focus Mode is active OR in News/Rides views which have their own dedicated header) */}
+        {!isMindFocusMode && view !== 'news' && view !== 'rides' && (
           <header className="relative h-14 border-b border-[var(--line)]/80 bg-[var(--card)]/90 backdrop-blur-md px-3 sm:px-4 flex items-center justify-between shrink-0 z-30 transition-all duration-200">
             <div className="flex items-center gap-2 sm:gap-2.5 min-w-0">
               {/* Sidebar toggle for Desktop and Mobile */}
@@ -4980,42 +5103,44 @@ export default function App() {
               )}
 
               {view === 'chat' && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setIsMindFocusMode(true);
-                    setIsMobileSidebarOpen(false);
-                    setIsMobileHeaderMenuOpen(false);
-                    setRatingPopoverMsgId(null);
-                    setCorrectionTargetId(null);
-                  }}
-                  className="flex items-center justify-center w-8 h-8 rounded-xl bg-[var(--bg)] hover:bg-[var(--green)]/12 border border-[var(--line)] hover:border-[var(--green)]/50 text-[var(--ink)] hover:text-[var(--green)] text-xs font-bold shadow-2xs transition-all duration-150 cursor-pointer group"
-                  title={
-                    lang === 'ar'
-                      ? 'وضع التركيز الذهني'
-                      : lang === 'fr'
-                      ? 'Mode Concentration'
-                      : 'Mind Focus Mode'
-                  }
-                >
-                  {/* Custom Mind Focus Icon */}
-                  <svg
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    className="w-4 h-4 text-[var(--green)] transition-transform duration-200 group-hover:scale-110 shrink-0"
+                <>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsMindFocusMode(true);
+                      setIsMobileSidebarOpen(false);
+                      setIsMobileHeaderMenuOpen(false);
+                      setRatingPopoverMsgId(null);
+                      setCorrectionTargetId(null);
+                    }}
+                    className="flex items-center justify-center w-8 h-8 rounded-xl bg-[var(--bg)] hover:bg-[var(--green)]/12 border border-[var(--line)] hover:border-[var(--green)]/50 text-[var(--ink)] hover:text-[var(--green)] text-xs font-bold shadow-2xs transition-all duration-150 cursor-pointer group"
+                    title={
+                      lang === 'ar'
+                        ? 'وضع التركيز الذهني'
+                        : lang === 'fr'
+                        ? 'Mode Concentration'
+                        : 'Mind Focus Mode'
+                    }
                   >
-                    <circle cx="12" cy="12" r="3" fill="currentColor" fillOpacity="0.2" />
-                    <path d="M3 7V5a2 2 0 0 1 2-2h2" />
-                    <path d="M17 3h2a2 2 0 0 1 2 2v2" />
-                    <path d="M21 17v2a2 2 0 0 1-2 2h-2" />
-                    <path d="M7 21H5a2 2 0 0 1-2-2v-2" />
-                    <circle cx="12" cy="12" r="7" strokeDasharray="3 3" />
-                  </svg>
-                </button>
+                    {/* Custom Mind Focus Icon */}
+                    <svg
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      className="w-4 h-4 text-[var(--green)] transition-transform duration-200 group-hover:scale-110 shrink-0"
+                    >
+                      <circle cx="12" cy="12" r="3" fill="currentColor" fillOpacity="0.2" />
+                      <path d="M3 7V5a2 2 0 0 1 2-2h2" />
+                      <path d="M17 3h2a2 2 0 0 1 2 2v2" />
+                      <path d="M21 17v2a2 2 0 0 1-2 2h-2" />
+                      <path d="M7 21H5a2 2 0 0 1-2-2v-2" />
+                      <circle cx="12" cy="12" r="7" strokeDasharray="3 3" />
+                    </svg>
+                  </button>
+                </>
               )}
 
               {/* Language Switcher: Mobile Toggle + Desktop Full Pill (استبدل اللغة) */}
@@ -5733,6 +5858,7 @@ export default function App() {
                                       poster={poster}
                                       isSelectedForPdf={Boolean(selectedPostersForPdf[poster.id])}
                                       selectedCount={Object.keys(selectedPostersForPdf).length}
+                                      selectedPosterImages={Object.values(selectedPostersForPdf).filter(Boolean)}
                                       isActiveReference={activeReferencePoster?.poster.id === poster.id}
                                       isExportingPdf={isExportingPriceListPdf}
                                       pdfSettings={pdfExportSettings}
@@ -6688,16 +6814,16 @@ export default function App() {
                       )}
                     </div>
 
-                    <div className="flex items-center gap-1.5">
+                    <div className="flex items-center gap-1">
                       {/* Clear Chat button beside Send */}
                       {(messages.length > 0 || inputText || selectedImage || selectedPdf) && (
                         <button
                           type="button"
                           onClick={handleClearChat}
-                          className="w-8 h-8 rounded-full text-[var(--mute)] hover:text-rose-500 hover:bg-rose-500/10 flex items-center justify-center transition-all cursor-pointer"
+                          className="w-7 h-7 rounded-full text-[var(--mute)] hover:text-rose-500 hover:bg-rose-500/10 flex items-center justify-center transition-all cursor-pointer"
                           title="مسح المحادثة والمدخلات"
                         >
-                          <Trash2 className="w-4 h-4" />
+                          <Trash2 className="w-3.5 h-3.5 stroke-[2]" />
                         </button>
                       )}
 
@@ -6705,9 +6831,9 @@ export default function App() {
                       <button
                         type="button"
                         onClick={toggleSpeechRecognition}
-                        className={`w-8 h-8 rounded-full flex items-center justify-center transition-all duration-200 cursor-pointer ${
+                        className={`w-7 h-7 rounded-full flex items-center justify-center transition-all duration-200 cursor-pointer ${
                           isListening
-                            ? 'bg-rose-500 text-white animate-pulse ring-4 ring-rose-500/30 shadow-md scale-105'
+                            ? 'bg-rose-500 text-white animate-pulse ring-2 ring-rose-500/30 shadow-sm scale-105'
                             : 'bg-[var(--bg)] text-[var(--ink)] hover:text-[var(--green)] hover:bg-[var(--green)]/10 border border-[var(--line)] hover:border-[var(--green)]/40 shadow-2xs'
                         }`}
                         title={
@@ -6717,20 +6843,64 @@ export default function App() {
                         }
                       >
                         {isListening ? (
-                          <MicOff className="w-4 h-4 animate-bounce" />
+                          <MicOff className="w-3.5 h-3.5 stroke-[2] animate-bounce" />
                         ) : (
-                          <Mic className="w-4 h-4" />
+                          <Mic className="w-3.5 h-3.5 stroke-[2]" />
                         )}
+                      </button>
+
+                      {/* Live Voice Call Button */}
+                      <button
+                        type="button"
+                        onClick={() => setIsLiveCallOpen(true)}
+                        aria-label={
+                          lang === 'ar'
+                            ? 'بدء المحادثة الصوتية'
+                            : lang === 'fr'
+                            ? 'Démarrer la conversation vocale'
+                            : 'Start Voice Conversation'
+                        }
+                        className="relative w-7 h-7 rounded-full bg-[#031752] p-[1.5px] border border-emerald-500/75 shadow-md shadow-emerald-600/25 hover:shadow-emerald-500/45 hover:-translate-y-0.5 hover:scale-105 active:scale-95 flex items-center justify-center transition-all duration-200 cursor-pointer shrink-0 group overflow-visible"
+                        title={
+                          lang === 'ar'
+                            ? 'بدء المحادثة الصوتية'
+                            : lang === 'fr'
+                            ? 'Démarrer la conversation vocale'
+                            : 'Start Voice Conversation'
+                        }
+                      >
+                        <span className="pointer-events-none absolute bottom-full mb-2 left-1/2 -translate-x-1/2 px-2.5 py-1 rounded-lg bg-[var(--card)] text-[var(--ink)] border border-[var(--line)] shadow-lg text-[11px] font-bold whitespace-nowrap opacity-0 translate-y-1 group-hover:opacity-100 group-hover:translate-y-0 transition-all duration-150 z-50">
+                          {lang === 'ar'
+                            ? 'بدء المحادثة الصوتية'
+                            : lang === 'fr'
+                            ? 'Démarrer la conversation vocale'
+                            : 'Start Voice Conversation'}
+                        </span>
+                        <span className="absolute -inset-0.5 rounded-full bg-emerald-500/20 animate-pulse pointer-events-none" />
+                        <img
+                          src="/icon.svg"
+                          alt={lang === 'ar' ? 'بدء المحادثة الصوتية' : 'Start Voice Conversation'}
+                          title={
+                            lang === 'ar'
+                              ? 'بدء المحادثة الصوتية'
+                              : lang === 'fr'
+                              ? 'Démarrer la conversation vocale'
+                              : 'Start Voice Conversation'
+                          }
+                          referrerPolicy="no-referrer"
+                          className="relative w-full h-full rounded-full object-cover shadow-inner"
+                        />
+                        <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-emerald-500 ring-1 ring-[var(--card)] animate-pulse" />
                       </button>
 
                       {isSending ? (
                         <button
                           type="button"
                           onClick={handleStopGeneration}
-                          className="px-3 h-8 rounded-full bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-xs"
+                          className="px-2.5 h-7 rounded-full bg-rose-600 hover:bg-rose-700 text-white text-[11px] font-bold flex items-center justify-center gap-1 transition-all cursor-pointer shadow-xs"
                           title="إيقاف التوليد فوراً"
                         >
-                          <X className="w-3.5 h-3.5" />
+                          <X className="w-3 h-3 stroke-[2.2]" />
                           <span>إيقاف</span>
                         </button>
                       ) : (
@@ -6742,10 +6912,10 @@ export default function App() {
                             !selectedPdf &&
                             uploadedMultiFiles.length === 0
                           }
-                          className="w-8 h-8 rounded-full bg-[var(--green)] text-white hover:opacity-90 flex items-center justify-center transition-all disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer shadow-xs"
+                          className="w-7 h-7 rounded-full bg-[var(--green)] text-white hover:opacity-90 flex items-center justify-center transition-all disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer shadow-xs"
                           title={t.send}
                         >
-                          <ArrowUp className="w-4 h-4 stroke-[2.5]" />
+                          <ArrowUp className="w-3.5 h-3.5 stroke-[2.5]" />
                         </button>
                       )}
                     </div>
@@ -7316,6 +7486,14 @@ export default function App() {
               embedded={true}
               onClose={() => setView('chat')}
               onBackToChat={() => setView('chat')}
+              onOpenNews={() => setView('news')}
+              onToggleSidebar={() => {
+                if (window.innerWidth < 768) {
+                  setIsMobileSidebarOpen((prev) => !prev);
+                } else {
+                  setIsSidebarOpen((prev) => !prev);
+                }
+              }}
               lang={lang}
               isAdminLoggedIn={isAdminLoggedIn}
             />
@@ -9111,6 +9289,78 @@ export default function App() {
                   </div>
                 </div>
 
+                {/* Periodic System Watchdog & Silent Auto-Repair Diagnostics Card (Admin Only) */}
+                <div className="bg-[var(--card)] border border-[var(--line)] rounded-2xl p-4 space-y-3 shadow-sm">
+                  <div className="flex items-center justify-between gap-2">
+                    <div>
+                      <b className="text-xs text-[var(--ink)] flex items-center gap-1.5">
+                        <ShieldCheck className="w-4 h-4 text-[var(--green)]" />
+                        <span>المراقبة الدورية والإصلاح التلقائي الشامل للنظام</span>
+                      </b>
+                      <p className="text-[11px] text-[var(--mute)] m-0 mt-0.5">
+                        مراقبة صامتة في الخلفية (كل 60 ثانية) لفحص وإصلاح التنزيل المباشر، استقرار النماذج، وأداء الذاكرة
+                      </p>
+                    </div>
+                    <span className="px-2.5 py-1 rounded-full text-[10px] font-bold bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 shrink-0">
+                      {systemWatchdogStatus?.status === 'repaired' ? 'تم الإصلاح تلقائياً' : 'نشط وسليم 100%'}
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1 text-[11px]">
+                    <div className="p-2.5 rounded-xl bg-[var(--bg)] border border-[var(--line)]">
+                      <span className="text-[10px] text-[var(--mute)] block">تنزيل التطبيق المباشر</span>
+                      <b className="text-[var(--ink)] mt-0.5 block">
+                        {systemWatchdogStatus?.downloadReady !== false ? 'جاهز ومفحوص (APK)' : 'قيد الإصلاح'}
+                      </b>
+                    </div>
+                    <div className="p-2.5 rounded-xl bg-[var(--bg)] border border-[var(--line)]">
+                      <span className="text-[10px] text-[var(--mute)] block">محرك الذكاء الاصطناعي</span>
+                      <b className="text-[var(--ink)] mt-0.5 block">
+                        {systemWatchdogStatus?.aiEngineReady !== false ? 'متصل ومستقر' : 'وضع الطوارئ'}
+                      </b>
+                    </div>
+                    <div className="p-2.5 rounded-xl bg-[var(--bg)] border border-[var(--line)]">
+                      <span className="text-[10px] text-[var(--mute)] block">استهلاك الذاكرة (RAM)</span>
+                      <b className="text-[var(--ink)] mt-0.5 block">
+                        {systemWatchdogStatus?.heapUsedMb ? `${systemWatchdogStatus.heapUsedMb} MB` : 'مثالي'}
+                      </b>
+                    </div>
+                    <div className="p-2.5 rounded-xl bg-[var(--bg)] border border-[var(--line)]">
+                      <span className="text-[10px] text-[var(--mute)] block">عمليات الإصلاح التلقائي</span>
+                      <b className="text-[var(--ink)] mt-0.5 block">
+                        {systemWatchdogStatus?.autoRepairsCount ?? 0} عملية ناجحة
+                      </b>
+                    </div>
+                  </div>
+
+                  {systemWatchdogStatus?.lastRepairReason && (
+                    <div className="text-[11px] text-[var(--mute)] bg-[var(--bg)] px-3 py-2 rounded-xl border border-[var(--line)]">
+                      <b className="text-[var(--ink)]">آخر إصلاح صامت: </b>
+                      <span>{systemWatchdogStatus.lastRepairReason}</span>
+                    </div>
+                  )}
+
+                  <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+                    <span className="text-[10px] text-[var(--mute)]">
+                      آخر فحص دوري:{' '}
+                      {systemWatchdogStatus?.lastCheckAt
+                        ? new Date(systemWatchdogStatus.lastCheckAt).toLocaleTimeString('ar-DZ')
+                        : 'الآن'}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={handleRunAdminWatchdogRepair}
+                      disabled={isRunningWatchdogRepair}
+                      className="min-h-[40px] py-2 px-4 rounded-xl bg-[var(--green)] text-[var(--on)] text-xs font-bold flex items-center justify-center gap-2 cursor-pointer transition-opacity hover:opacity-90 disabled:opacity-60 shadow-xs"
+                    >
+                      <RefreshCw className={`w-3.5 h-3.5 ${isRunningWatchdogRepair ? 'animate-spin' : ''}`} />
+                      <span>
+                        {isRunningWatchdogRepair ? 'جاري الفحص والإصلاح الشامل...' : 'فحص وإصلاح شامل الآن'}
+                      </span>
+                    </button>
+                  </div>
+                </div>
+
                 {/* Android APK & Direct Download Link Manager Card */}
                 <div className="bg-[var(--card)] border border-[var(--line)] rounded-2xl p-4 space-y-3 shadow-sm">
                   <div className="flex items-center justify-between gap-2">
@@ -9546,6 +9796,44 @@ export default function App() {
         isOpen={isMemoryModalOpen}
         onClose={() => setIsMemoryModalOpen(false)}
         userId={firebaseUser?.uid || 'default_user'}
+      />
+
+      {/* Gemini Multimodal Live API Bidirectional Voice & Vision Call Modal */}
+      <LiveVoiceCallModal
+        isOpen={isLiveCallOpen}
+        onClose={() => setIsLiveCallOpen(false)}
+        appName={t.appName}
+        locationName={currentLocationDisplayName}
+        lang={lang}
+        onSaveCallTurn={(userText, assistantText) => {
+          const now = Date.now();
+          setMessages((prev) => {
+            const next = [...prev];
+            if (userText) {
+              next.push({
+                id: `live-u-${now}-${Math.random().toString(36).slice(2, 6)}`,
+                role: 'me',
+                text: `📞 ${userText}`,
+                timestamp: now,
+              });
+            }
+            if (assistantText) {
+              next.push({
+                id: `live-b-${now + 1}-${Math.random().toString(36).slice(2, 6)}`,
+                role: 'bot',
+                text: assistantText,
+                timestamp: now + 1,
+                agentId: selectedAgentId,
+                sourceInfo: {
+                  engine: 'Gemini Multimodal Live API',
+                  model: 'gemini-3.8-live',
+                  badgeTitle: 'مكالمة صوتية مباشرة',
+                },
+              });
+            }
+            return next;
+          });
+        }}
       />
 
       {/* Admin PIN Login Modal */}

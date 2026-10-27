@@ -490,48 +490,88 @@ select,
 .rafiq-page .bar {
   position: sticky;
   top: 0;
-  z-index: 5;
-  background: color-mix(in srgb, var(--card) 92%, transparent);
-  backdrop-filter: blur(8px);
+  z-index: 25;
+  background: color-mix(in srgb, var(--card) 94%, transparent);
+  backdrop-filter: blur(10px);
   border-bottom: 1px solid var(--line);
+  width: 100%;
 }
 
 .rafiq-page .bar-in {
-  max-width: 640px;
+  max-width: 980px;
+  width: 100%;
   margin: 0 auto;
-  height: 56px;
-  padding: 0 14px;
+  min-height: 56px;
+  padding: 6px 12px;
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 8px;
 }
 
 .rafiq-page .brand {
   display: flex;
   align-items: center;
-  gap: 9px;
+  gap: 8px;
   font-weight: 800;
   color: var(--ink);
-  margin-inline-end: auto;
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+}
+
+.rafiq-page .brand-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.rafiq-page .brand-title {
+  font-size: 14px;
+  font-weight: 850;
+  line-height: 1.2;
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.rafiq-page .brand-sub {
+  font-size: 10.5px;
+  font-weight: 650;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.rafiq-page .bar-actions {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
 }
 
 .rafiq-page .mark {
   width: 34px;
   height: 34px;
-  border-radius: 11px;
+  flex-shrink: 0;
+  border-radius: 10px;
   background: linear-gradient(145deg, var(--green), #1d3f35);
   color: #fff;
   display: grid;
   place-items: center;
-  box-shadow: 0 4px 12px rgba(47, 93, 80, 0.25);
+  box-shadow: 0 3px 10px rgba(47, 93, 80, 0.22);
 }
 
 .rafiq-page .icon-btn {
-  width: 40px;
-  height: 40px;
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
   border: 1px solid var(--line);
   background: var(--surface);
-  border-radius: 12px;
+  border-radius: 11px;
   display: grid;
   place-items: center;
   color: var(--muted);
@@ -542,17 +582,53 @@ select,
   border-color: var(--green);
 }
 
+.rafiq-page .news-switch-btn {
+  height: 36px;
+  border: 1px solid color-mix(in srgb, var(--green) 35%, var(--line));
+  border-radius: 11px;
+  background: var(--sky);
+  color: var(--green);
+  font-weight: 800;
+  font-size: 12px;
+  padding: 0 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+}
+
+.rafiq-page .news-switch-btn .i {
+  width: 15px;
+  height: 15px;
+}
+
 .rafiq-page .pub {
-  height: 40px;
+  height: 36px;
   border: 0;
-  border-radius: 12px;
+  border-radius: 11px;
   background: var(--green);
   color: var(--on);
-  font-weight: 750;
-  padding: 0 14px;
-  display: flex;
+  font-weight: 800;
+  font-size: 12.5px;
+  padding: 0 11px;
+  display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
+  white-space: nowrap;
+}
+
+@media (max-width: 420px) {
+  .rafiq-page .brand-sub {
+    display: none;
+  }
+  .rafiq-page .pub span {
+    display: none;
+  }
+  .rafiq-page .pub {
+    width: 36px;
+    padding: 0;
+    justify-content: center;
+  }
 }
 
 .rafiq-page .pub:hover,
@@ -562,9 +638,19 @@ select,
 }
 
 .rafiq-page main {
-  max-width: 640px;
+  max-width: 720px;
+  width: 100%;
   margin: 0 auto;
-  padding: 14px 14px 48px;
+  padding: 12px 12px 64px;
+}
+
+@media (min-width: 640px) {
+  .rafiq-page .bar-in {
+    padding: 8px 20px;
+  }
+  .rafiq-page main {
+    padding: 18px 20px 64px;
+  }
 }
 
 .rafiq-page .search {
@@ -572,13 +658,13 @@ select,
   border: 1px solid var(--line);
   border-radius: 18px;
   padding: 12px;
-  box-shadow: 0 10px 30px rgba(43, 42, 38, 0.06);
+  box-shadow: 0 6px 20px rgba(43, 42, 38, 0.05);
 }
 
 .rafiq-page .route-box {
   display: flex;
   align-items: stretch;
-  gap: 10px;
+  gap: 8px;
 }
 
 .rafiq-page .dots {
@@ -587,7 +673,7 @@ select,
   align-items: center;
   justify-content: center;
   gap: 3px;
-  padding: 0 4px;
+  padding: 6px 2px;
 }
 
 .rafiq-page .dots i {
@@ -613,17 +699,19 @@ select,
   flex: 1;
   min-width: 0;
   display: grid;
-  gap: 8px;
+  gap: 7px;
 }
 
 .rafiq-page .inputs input {
   width: 100%;
-  height: 46px;
+  height: 42px;
   border: 1px solid var(--line);
-  border-radius: 12px;
+  border-radius: 11px;
   padding: 0 12px;
   background: var(--page);
   color: var(--ink);
+  font-size: 13.5px;
+  font-weight: 650;
   outline: none;
 }
 
@@ -634,8 +722,9 @@ select,
 
 .rafiq-page .swap {
   align-self: center;
-  width: 38px;
-  height: 38px;
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
   border-radius: 50%;
   border: 1px solid var(--line);
   background: var(--surface);
@@ -649,23 +738,64 @@ select,
   border-color: var(--green);
 }
 
+.rafiq-page .quick-routes {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow-x: auto;
+  padding: 10px 0 2px;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+
+.rafiq-page .quick-routes::-webkit-scrollbar {
+  display: none;
+}
+
+.rafiq-page .qroute {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  white-space: nowrap;
+  padding: 5px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--page);
+  color: var(--muted);
+  font-size: 11.5px;
+  font-weight: 750;
+}
+
+.rafiq-page .qroute-arrow {
+  color: var(--green);
+  font-weight: 900;
+}
+
+.rafiq-page .qroute.active {
+  background: var(--sky);
+  border-color: var(--green);
+  color: var(--green);
+}
+
 .rafiq-page .row2 {
   display: flex;
-  gap: 8px;
-  margin-top: 10px;
+  gap: 7px;
+  margin-top: 9px;
 }
 
 .rafiq-page .cf {
   display: flex;
   align-items: center;
-  gap: 7px;
-  height: 46px;
+  gap: 6px;
+  height: 42px;
   border: 1px solid var(--line);
-  border-radius: 12px;
+  border-radius: 11px;
   padding: 0 10px;
   background: var(--page);
   color: var(--muted);
   min-width: 0;
+  font-size: 13px;
 }
 
 .rafiq-page .cf input,
@@ -676,6 +806,8 @@ select,
   min-width: 0;
   width: 100%;
   color: var(--ink);
+  font-size: 13px;
+  font-weight: 700;
 }
 
 .rafiq-page .cf.date {
@@ -683,29 +815,39 @@ select,
 }
 
 .rafiq-page .cf.pax {
-  width: 82px;
+  width: 102px;
+  flex-shrink: 0;
 }
 
 .rafiq-page .go {
-  height: 46px;
+  height: 42px;
   border: 0;
-  border-radius: 12px;
+  border-radius: 11px;
   background: var(--green);
   color: var(--on);
   font-weight: 800;
-  padding: 0 18px;
+  font-size: 13px;
+  padding: 0 14px;
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 7px;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.rafiq-page .go.reset-btn {
+  background: var(--page);
+  color: var(--bad);
+  border: 1px solid color-mix(in srgb, var(--bad) 35%, var(--line));
 }
 
 .rafiq-page .chips {
   display: flex;
-  gap: 8px;
+  gap: 7px;
   overflow-x: auto;
-  padding: 14px 0 4px;
+  padding: 12px 0 4px;
   scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
 }
 
 .rafiq-page .chips::-webkit-scrollbar {
@@ -715,27 +857,36 @@ select,
 .rafiq-page .chip {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
+  flex-shrink: 0;
   white-space: nowrap;
   border: 1px solid var(--line);
   background: var(--surface);
   border-radius: 999px;
-  padding: 7px 12px;
-  font-size: 13px;
-  font-weight: 650;
+  padding: 6px 12px;
+  font-size: 12.5px;
+  font-weight: 700;
   color: var(--muted);
 }
 
 .rafiq-page .chip .i {
-  width: 16px;
-  height: 16px;
+  width: 15px;
+  height: 15px;
 }
 
 .rafiq-page .chip[aria-pressed="true"] {
   border-color: var(--green);
   background: var(--sky);
   color: var(--green);
-  font-weight: 750;
+  font-weight: 800;
+}
+
+.rafiq-page .count-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 2px 8px;
 }
 
 .rafiq-page .count {
@@ -744,7 +895,30 @@ select,
   gap: 6px;
   color: var(--muted);
   font-size: 13px;
-  padding: 10px 2px 8px;
+  padding: 0;
+}
+
+.rafiq-page .count b {
+  color: var(--ink);
+  font-weight: 850;
+}
+
+.rafiq-page .inline-add-ride {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: 1px dashed var(--green);
+  background: var(--sky);
+  color: var(--green);
+  border-radius: 999px;
+  padding: 4px 11px;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.rafiq-page .inline-add-ride .i {
+  width: 14px;
+  height: 14px;
 }
 
 .rafiq-page .list {
@@ -756,33 +930,45 @@ select,
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: 16px;
-  padding: 13px 14px;
+  padding: 12px 13px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.025);
+}
+
+.rafiq-page .card.full-ride {
+  opacity: 0.78;
 }
 
 .rafiq-page .top {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
 }
 
 .rafiq-page .when {
   text-align: center;
-  min-width: 52px;
-  padding-inline-end: 12px;
-  border-inline-end: 1px solid var(--line);
+  min-width: 56px;
+  padding: 5px 8px;
+  border-radius: 11px;
+  background: var(--page);
+  border: 1px solid var(--line);
+  flex-shrink: 0;
 }
 
 .rafiq-page .when b {
   display: block;
-  font-size: 17px;
+  font-size: 15px;
+  line-height: 1.2;
   color: var(--ink);
   font-variant-numeric: tabular-nums;
   direction: ltr;
 }
 
 .rafiq-page .when small {
+  display: block;
   color: var(--muted);
-  font-size: 11px;
+  font-size: 10.5px;
+  font-weight: 700;
+  margin-top: 1px;
 }
 
 .rafiq-page .route {
@@ -790,67 +976,81 @@ select,
   min-width: 0;
   display: flex;
   align-items: center;
-  gap: 7px;
-  font-weight: 800;
+  gap: 6px;
+  font-weight: 850;
   color: var(--ink);
-  font-size: 16px;
+  font-size: 15px;
   flex-wrap: wrap;
 }
 
-.rafiq-page .route .i {
+.rafiq-page .route-arrow {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--sky);
   color: var(--green);
+  flex-shrink: 0;
+}
+
+.rafiq-page .route-arrow .i {
+  width: 14px;
+  height: 14px;
 }
 
 .rafiq-page .price {
-  font-weight: 850;
+  font-weight: 900;
   color: var(--ink);
-  font-size: 17px;
+  font-size: 15.5px;
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
+  background: var(--page);
+  border: 1px solid var(--line);
+  padding: 5px 10px;
+  border-radius: 10px;
+  flex-shrink: 0;
 }
 
 .rafiq-page .price small {
-  font-size: 11px;
+  font-size: 10.5px;
   color: var(--muted);
-  font-weight: 600;
+  font-weight: 700;
 }
 
 .rafiq-page .price.free {
   color: var(--green);
+  background: var(--green-bg);
+  border-color: color-mix(in srgb, var(--green) 25%, transparent);
 }
 
 .rafiq-page .meta {
   display: flex;
   align-items: center;
-  gap: 12px;
-  margin-top: 11px;
+  gap: 6px;
+  margin-top: 10px;
   color: var(--muted);
-  font-size: 13px;
+  font-size: 12px;
   flex-wrap: wrap;
 }
 
-.rafiq-page .m {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-}
-
 .rafiq-page .pill {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: 4px;
   background: var(--page);
   border: 1px solid var(--line);
   border-radius: 8px;
-  padding: 4px 9px;
-  font-weight: 700;
-  font-size: 12px;
+  padding: 3px 8px;
+  font-weight: 750;
+  font-size: 11.5px;
   color: var(--ink);
 }
 
 .rafiq-page .pill .i {
-  width: 15px;
-  height: 15px;
+  width: 13px;
+  height: 13px;
 }
 
 .rafiq-page .pill.companion {
@@ -865,16 +1065,67 @@ select,
   border-color: transparent;
 }
 
-.rafiq-page .extra {
-  margin-top: 10px;
-  padding: 9px 11px;
+.rafiq-page .seats-pill,
+.rafiq-page .car-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   background: var(--page);
   border: 1px solid var(--line);
-  border-radius: 10px;
+  border-radius: 8px;
+  padding: 3px 8px;
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.rafiq-page .seats-pill .i,
+.rafiq-page .car-pill .i {
+  width: 13px;
+  height: 13px;
+  color: var(--green);
+}
+
+.rafiq-page .seats-pill.none {
   color: var(--muted);
+  opacity: 0.75;
+}
+
+.rafiq-page .note-preview {
+  margin-top: 8px;
+  padding: 6px 10px;
+  border-radius: 9px;
+  background: var(--page);
+  color: var(--muted);
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+
+.rafiq-page .note-preview .i {
+  width: 14px;
+  height: 14px;
+  color: var(--green);
+}
+
+.rafiq-page .note-preview span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rafiq-page .extra {
+  margin-top: 10px;
+  padding: 10px 12px;
+  background: var(--page);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  color: var(--ink);
   font-size: 13px;
   display: grid;
-  gap: 4px;
+  gap: 6px;
 }
 
 .rafiq-page .extra div {
@@ -886,16 +1137,40 @@ select,
 .rafiq-page .foot {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 8px;
-  margin-top: 11px;
-  padding-top: 11px;
+  margin-top: 10px;
+  padding-top: 10px;
   border-top: 1px solid var(--line);
   font-size: 13px;
+}
+
+.rafiq-page .driver-info {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+
+.rafiq-page .driver-name {
+  font-weight: 800;
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.rafiq-page .foot-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
 }
 
 .rafiq-page .avatar {
   width: 30px;
   height: 30px;
+  flex-shrink: 0;
   border-radius: 50%;
   display: grid;
   place-items: center;
@@ -907,10 +1182,22 @@ select,
 .rafiq-page .ok {
   color: var(--green);
   display: flex;
+  flex-shrink: 0;
 }
 
 .rafiq-page .spacer {
   margin-inline-start: auto;
+}
+
+.rafiq-page .quick-call-btn {
+  width: 36px;
+  height: 36px;
+  border: 1px solid color-mix(in srgb, var(--green) 35%, var(--line));
+  background: var(--sky);
+  color: var(--green);
+  border-radius: 10px;
+  display: grid;
+  place-items: center;
 }
 
 .rafiq-page .more {
@@ -938,7 +1225,7 @@ select,
   padding: 0 14px;
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
   font-size: 13px;
 }
 
@@ -950,26 +1237,26 @@ select,
 
 .rafiq-page .notice {
   display: flex;
-  gap: 9px;
-  align-items: flex-start;
+  gap: 8px;
+  align-items: center;
   background: var(--amber-bg);
   color: var(--amber);
   border: 1px solid var(--amber-border);
   border-radius: 12px;
-  padding: 9px 12px;
-  font-size: 12.5px;
-  margin-top: 12px;
-  line-height: 1.55;
+  padding: 8px 11px;
+  font-size: 12px;
+  margin-top: 10px;
+  line-height: 1.45;
 }
 
 .rafiq-page .notice .i {
-  margin-top: 2px;
+  flex-shrink: 0;
 }
 
 .rafiq-page .contact {
   display: flex;
   gap: 8px;
-  margin-top: 2px;
+  margin-top: 4px;
 }
 
 .rafiq-page .cbtn {
@@ -981,7 +1268,7 @@ select,
   justify-content: center;
   gap: 6px;
   font-weight: 800;
-  font-size: 13px;
+  font-size: 12.5px;
   text-decoration: none;
   border: 1px solid;
 }
@@ -1601,11 +1888,11 @@ select,
 }
 
 .mahaliyat-page .bar-in {
-  max-width: 980px;
+  max-width: 720px;
   width: 100%;
   margin: 0 auto;
-  min-height: 58px;
-  padding: 8px 16px;
+  min-height: 56px;
+  padding: 6px 12px;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -1631,7 +1918,7 @@ select,
 }
 
 .mahaliyat-page .brand-title {
-  font-size: 14.5px;
+  font-size: 14px;
   font-weight: 850;
   line-height: 1.2;
   color: var(--t950);
@@ -1643,8 +1930,28 @@ select,
 .mahaliyat-page .bar-actions {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
   flex-shrink: 0;
+}
+
+.mahaliyat-page .rafiq-switch-btn {
+  height: 36px;
+  border: 1px solid color-mix(in srgb, var(--t700) 35%, var(--line));
+  background: var(--t50);
+  color: var(--t800);
+  border-radius: 11px;
+  padding: 0 11px;
+  font-size: 12.5px;
+  font-weight: 800;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+  transition: background-color 0.15s ease;
+}
+
+.mahaliyat-page .rafiq-switch-btn:hover {
+  background: var(--t100);
 }
 
 .mahaliyat-page .mark {
@@ -1652,14 +1959,16 @@ select,
   height: 34px;
   flex-shrink: 0;
   border-radius: 10px;
-  background: linear-gradient(145deg, var(--t700), #123b3d);
+  background: #031752;
   color: #fff;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   font-weight: 900;
   font-size: 13px;
-  border: 0;
+  border: 1px solid var(--line);
+  padding: 0;
+  overflow: hidden;
 }
 
 .mahaliyat-page .loc {
@@ -1670,7 +1979,7 @@ select,
   background: transparent;
   padding: 0;
   color: var(--muted);
-  font-size: 11px;
+  font-size: 10.5px;
   font-weight: 650;
   line-height: 1.25;
   max-width: 100%;
@@ -1700,16 +2009,20 @@ select,
 
 @media (min-width: 480px) {
   .mahaliyat-page .ib {
-    width: 40px;
-    height: 40px;
+    width: 38px;
+    height: 38px;
     border-radius: 12px;
   }
+  .mahaliyat-page .rafiq-switch-btn {
+    height: 38px;
+    padding: 0 13px;
+  }
   .mahaliyat-page .bar-in {
-    padding: 6px 14px;
+    padding: 6px 16px;
     gap: 8px;
   }
   .mahaliyat-page .bar-actions {
-    gap: 7px;
+    gap: 6px;
   }
 }
 
@@ -1729,14 +2042,24 @@ select,
 
 .mahaliyat-page .searchrow {
   display: none;
-  max-width: 980px;
+  max-width: 720px;
   width: 100%;
   margin: 0 auto;
-  padding: 0 16px 12px;
+  padding: 0 12px 10px;
 }
 
 .mahaliyat-page .searchrow.open {
   display: block;
+}
+
+.mahaliyat-page .clear-search-btn {
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  padding: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .mahaliyat-page .field {
@@ -1762,26 +2085,26 @@ select,
   background: transparent;
   outline: none;
   color: var(--ink);
-  font-size: 14px;
+  font-size: 13.5px;
 }
 
 .mahaliyat-page .mahaliyat-main {
-  max-width: 980px;
+  max-width: 720px;
   width: 100%;
   margin: 0 auto;
-  padding: 16px 16px 110px;
+  padding: 12px 12px 96px;
   flex: 1;
 }
 
 @media (min-width: 640px) {
   .mahaliyat-page .bar-in {
-    padding: 8px 24px;
+    padding: 8px 20px;
   }
   .mahaliyat-page .searchrow {
-    padding: 0 24px 12px;
+    padding: 0 20px 12px;
   }
   .mahaliyat-page .mahaliyat-main {
-    padding: 20px 24px 110px;
+    padding: 18px 20px 100px;
   }
 }
 
@@ -1789,20 +2112,21 @@ select,
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: 16px;
-  padding: 11px 12px;
+  padding: 10px 11px;
   width: 100%;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.025);
 }
 
 .mahaliyat-page .c-top {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   min-width: 0;
 }
 
 .mahaliyat-page .av {
-  width: 38px;
-  height: 38px;
+  width: 36px;
+  height: 36px;
   flex-shrink: 0;
   border-radius: 50%;
   display: inline-flex;
@@ -1811,7 +2135,7 @@ select,
   background: var(--t100);
   color: var(--t950);
   font-weight: 850;
-  font-size: 14px;
+  font-size: 13.5px;
 }
 
 .mahaliyat-page .av.off {
@@ -1822,17 +2146,33 @@ select,
 .mahaliyat-page .prompt {
   flex: 1;
   min-width: 0;
-  min-height: 40px;
-  border: 0;
-  border-radius: 20px;
+  min-height: 38px;
+  border: 1px solid transparent;
+  border-radius: 19px;
   background: var(--prompt-bg);
   color: var(--muted);
-  padding: 8px 14px;
+  padding: 7px 13px;
   text-align: right;
-  font-size: 13.5px;
+  font-size: 13px;
+  font-weight: 600;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.mahaliyat-page .quick-post-btn {
+  height: 36px;
+  border: 0;
+  border-radius: 11px;
+  background: var(--t800);
+  color: #fff;
+  padding: 0 11px;
+  font-size: 12px;
+  font-weight: 800;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
 }
 
 .mahaliyat-page .c-more {
@@ -1847,15 +2187,16 @@ select,
 
 .mahaliyat-page .c-more textarea {
   width: 100%;
-  min-height: 92px;
+  min-height: 88px;
   resize: vertical;
   border: 1px solid var(--line);
   background: var(--field-bg);
   color: var(--ink);
   border-radius: 12px;
-  padding: 11px;
+  padding: 10px 12px;
   outline: none;
   font-size: 14px;
+  line-height: 1.6;
 }
 
 .mahaliyat-page .c-more textarea:focus {
@@ -1864,22 +2205,22 @@ select,
 
 .mahaliyat-page .grid2 {
   display: grid;
-  grid-template-columns: 1fr;
+  grid-template-columns: 1fr 1fr;
   gap: 8px;
 }
 
-@media (min-width: 480px) {
+@media (max-width: 380px) {
   .mahaliyat-page .grid2 {
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: 1fr;
   }
 }
 
 .mahaliyat-page .hint {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: 6px;
   color: var(--muted);
-  font-size: 12px;
+  font-size: 11.5px;
   line-height: 1.4;
 }
 
@@ -1900,7 +2241,7 @@ select,
   padding: 4px 8px 4px 10px;
   font-size: 12px;
   font-weight: 700;
-  max-width: 180px;
+  max-width: 160px;
   min-width: 0;
 }
 
@@ -1925,19 +2266,31 @@ select,
   flex-shrink: 0;
 }
 
-.mahaliyat-page .send {
+.mahaliyat-page .cancel-compose-btn {
   margin-inline-start: auto;
-  height: 40px;
+  height: 38px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: var(--surface);
+  color: var(--muted);
+  font-weight: 700;
+  font-size: 12.5px;
+  padding: 0 12px;
+}
+
+.mahaliyat-page .send {
+  height: 38px;
   border: 0;
-  border-radius: 12px;
+  border-radius: 11px;
   background: var(--t800);
   color: #fff;
   font-weight: 800;
-  padding: 0 16px;
+  font-size: 13px;
+  padding: 0 15px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 7px;
+  gap: 6px;
   flex-shrink: 0;
 }
 
@@ -1948,9 +2301,9 @@ select,
 .mahaliyat-page .chips {
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: 6px;
   overflow-x: auto;
-  padding: 12px 0 4px;
+  padding: 11px 0 4px;
   scrollbar-width: none;
   -webkit-overflow-scrolling: touch;
   width: 100%;
@@ -1963,21 +2316,21 @@ select,
 .mahaliyat-page .chip {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
   flex-shrink: 0;
   white-space: nowrap;
   border: 1px solid var(--line);
   background: var(--surface);
   border-radius: 999px;
-  padding: 7px 12px;
-  font-size: 13px;
-  font-weight: 700;
+  padding: 6px 11px;
+  font-size: 12.5px;
+  font-weight: 750;
   color: var(--muted);
 }
 
 .mahaliyat-page .chip .i {
-  width: 16px;
-  height: 16px;
+  width: 15px;
+  height: 15px;
 }
 
 .mahaliyat-page .chip[aria-pressed="true"] {
@@ -1991,28 +2344,33 @@ select,
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  flex-wrap: wrap;
   color: var(--muted);
-  font-size: 13px;
-  padding: 8px 2px;
+  font-size: 12.5px;
+  padding: 8px 2px 6px;
 }
 
 .mahaliyat-page .tool .m {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
+}
+
+.mahaliyat-page .tool .m b {
+  color: var(--t950);
+  font-weight: 850;
 }
 
 .mahaliyat-page .sort {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  border: 0;
-  background: transparent;
+  gap: 5px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface);
   color: var(--t700);
   font-weight: 750;
-  font-size: 13px;
-  padding: 6px 4px;
+  font-size: 12px;
+  padding: 4px 10px;
 }
 
 .mahaliyat-page .feed {
@@ -2026,16 +2384,17 @@ select,
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: 16px;
-  padding: 13px 14px;
+  padding: 12px 13px;
   width: 100%;
   min-width: 0;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.025);
 }
 
 .mahaliyat-page .head {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 10px;
+  gap: 9px;
   width: 100%;
   min-width: 0;
 }
@@ -2059,9 +2418,16 @@ select,
   flex-wrap: wrap;
   gap: 5px;
   font-weight: 850;
-  font-size: 14px;
+  font-size: 13.5px;
   color: var(--t950);
-  line-height: 1.35;
+  line-height: 1.3;
+}
+
+.mahaliyat-page .author-name {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 170px;
 }
 
 .mahaliyat-page .ok {
@@ -2071,10 +2437,10 @@ select,
 }
 
 .mahaliyat-page .pill {
-  font-size: 11px;
-  font-weight: 700;
+  font-size: 10.5px;
+  font-weight: 750;
   border-radius: 999px;
-  padding: 1px 8px;
+  padding: 1px 7px;
   background: var(--pill-bg);
   color: var(--pill-fg);
   white-space: nowrap;
@@ -2095,10 +2461,26 @@ select,
 }
 
 .mahaliyat-page .meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
   color: var(--muted);
-  font-size: 12px;
-  margin-top: 2px;
-  line-height: 1.35;
+  font-size: 11.5px;
+  margin-top: 3px;
+  line-height: 1.3;
+}
+
+.mahaliyat-page .place-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  background: var(--t50);
+  color: var(--t800);
+  border-radius: 6px;
+  padding: 1px 6px;
+  font-weight: 700;
+  font-size: 11px;
 }
 
 .mahaliyat-page .cat {
@@ -2107,23 +2489,24 @@ select,
   gap: 4px;
   color: var(--t700);
   background: var(--t50);
+  border: 1px solid color-mix(in srgb, var(--t700) 20%, transparent);
   border-radius: 9px;
-  padding: 4px 8px;
-  font-size: 11.5px;
-  font-weight: 750;
+  padding: 3px 8px;
+  font-size: 11px;
+  font-weight: 800;
   white-space: nowrap;
   flex-shrink: 0;
 }
 
 .mahaliyat-page .cat .i {
-  width: 14px;
-  height: 14px;
+  width: 13px;
+  height: 13px;
 }
 
 .mahaliyat-page .txt {
   margin: 10px 0 0;
-  line-height: 1.8;
-  font-size: 14.5px;
+  line-height: 1.75;
+  font-size: 14px;
   white-space: pre-line;
   overflow-wrap: anywhere;
   color: var(--ink);
@@ -2132,7 +2515,7 @@ select,
 .mahaliyat-page .media {
   display: block;
   width: 100%;
-  max-height: 300px;
+  max-height: 280px;
   object-fit: cover;
   border-radius: 12px;
   margin-top: 10px;
@@ -2140,14 +2523,18 @@ select,
 }
 
 .mahaliyat-page .src {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  gap: 6px;
-  margin-top: 10px;
+  gap: 5px;
+  margin-top: 9px;
+  padding: 4px 9px;
+  border-radius: 8px;
+  background: var(--field-bg);
+  border: 1px solid var(--line);
   color: var(--muted);
-  font-size: 12px;
+  font-size: 11.5px;
   overflow-wrap: anywhere;
-  min-width: 0;
+  max-width: 100%;
 }
 
 .mahaliyat-page .src a {
@@ -2158,8 +2545,7 @@ select,
 .mahaliyat-page .acts {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
-  gap: 4px;
+  gap: 6px;
   margin-top: 10px;
   padding-top: 8px;
   border-top: 1px solid var(--line);
@@ -2169,15 +2555,26 @@ select,
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 6px;
-  border: 0;
-  background: transparent;
+  gap: 5px;
+  border: 1px solid transparent;
+  background: var(--field-bg);
   color: var(--muted);
   border-radius: 10px;
-  padding: 7px 10px;
+  padding: 6px 10px;
   font-weight: 750;
-  font-size: 13px;
-  min-height: 38px;
+  font-size: 12px;
+  min-height: 34px;
+}
+
+.mahaliyat-page .act-cnt {
+  font-weight: 850;
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 360px) {
+  .mahaliyat-page .act-lbl {
+    display: none;
+  }
 }
 
 .mahaliyat-page .act:hover {
@@ -2187,6 +2584,7 @@ select,
 .mahaliyat-page .act[aria-pressed="true"] {
   color: var(--t700);
   background: var(--t50);
+  border-color: color-mix(in srgb, var(--t700) 30%, transparent);
 }
 
 .mahaliyat-page .act[aria-pressed="true"] .i {
@@ -2196,6 +2594,8 @@ select,
 
 .mahaliyat-page .act.end {
   margin-inline-start: auto;
+  background: transparent;
+  padding: 6px 8px;
 }
 
 .mahaliyat-page .act.end:hover {
@@ -2677,3 +3077,45 @@ select,
   caret-color: var(--green) !important;
   transition: background-color 5000s ease-in-out 0s;
 }
+
+/* ChatGPT-Style Fluid Glowing Voice Morphing Blobs (Driven by Web Audio API) */
+@keyframes voiceBlobMorph1 {
+  0%, 100% {
+    border-radius: 62% 38% 46% 54% / 54% 62% 38% 46%;
+  }
+  25% {
+    border-radius: 45% 55% 64% 36% / 48% 38% 62% 52%;
+  }
+  50% {
+    border-radius: 38% 62% 44% 56% / 64% 45% 55% 36%;
+  }
+  75% {
+    border-radius: 56% 44% 38% 62% / 42% 58% 42% 58%;
+  }
+}
+
+@keyframes voiceBlobMorph2 {
+  0%, 100% {
+    border-radius: 48% 52% 62% 38% / 60% 42% 58% 40%;
+  }
+  33% {
+    border-radius: 64% 36% 42% 58% / 44% 64% 36% 56%;
+  }
+  66% {
+    border-radius: 40% 60% 56% 44% / 58% 48% 52% 42%;
+  }
+}
+
+.chatgpt-morph-blob-1 {
+  animation: voiceBlobMorph1 6.5s ease-in-out infinite;
+  transform: rotate(var(--blob-1-rot, 0deg)) scale(var(--blob-1-scale, 1));
+  will-change: transform, border-radius;
+}
+
+.chatgpt-morph-blob-2 {
+  animation: voiceBlobMorph2 8s ease-in-out infinite;
+  transform: rotate(var(--blob-2-rot, 0deg)) scale(var(--blob-2-scale, 1.04));
+  will-change: transform, border-radius;
+}
+
+

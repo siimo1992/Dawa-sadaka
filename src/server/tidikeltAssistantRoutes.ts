@@ -36,6 +36,8 @@ import {
   deleteUserMemoryEntry,
   clearUserMemoryEntries,
   buildMemoryPromptContext,
+  learnLocalDialectAndMemoryFromTurn,
+  SAHRAWI_TIDIKELT_DIALECT_GUIDE,
 } from './conversationMemoryEngine.ts';
 import {
   enrichSearchSourcesWithPageContent,
@@ -148,17 +150,24 @@ export function preprocessAssistantRequest(params: {
     };
   }
 
-  const contextBlocks: string[] = [];
+  const contextBlocks: string[] = [SAHRAWI_TIDIKELT_DIALECT_GUIDE];
 
-  // 1. Long-Term Memory preferences
+  // 1. Long-Term Memory preferences & learned Sahrawi/local dialect vocabulary
   const memoryBlock = buildMemoryPromptContext(userId);
   if (memoryBlock) {
     contextBlocks.push(memoryBlock);
   }
 
-  // 2. Rolling summary of older messages in this conversation
+  // 2. Rolling summary + recent Short-Term Memory of this conversation
   if (conv.summary) {
     contextBlocks.push(`[ملخص السياق السابق للمحادثة]:\n${conv.summary}`);
+  }
+  if (conv.messages.length > 0) {
+    const recentShortTerm = conv.messages
+      .slice(-6)
+      .map((m) => `${m.role === 'user' ? 'الزائر' : 'المساعد'}: ${m.content}`)
+      .join('\n');
+    contextBlocks.push(`[الذاكرة قصيرة المدى — آخر ما قيل في المحادثة]:\n${recentShortTerm}`);
   }
 
   // 3. Session source follow-up or comparison («اشرح المصدر الثاني»، «قارن النتيجة الأولى بالثالثة»)
@@ -251,9 +260,13 @@ export async function postprocessAssistantResponse(params: {
     .reverse()
     .find((m) => m.role === 'assistant');
 
-  // Record user turn and assistant reply
-  appendConversationTurn(convId, { role: 'user', content: params.rawUserQuery }, userId);
-  appendConversationTurn(convId, { role: 'assistant', content: params.assistantReplyText }, userId);
+  // Record user turn, assistant reply, and learn local Sahrawi/Tidikelt dialect & long-term memory facts
+  learnLocalDialectAndMemoryFromTurn({
+    userText: params.rawUserQuery,
+    assistantText: params.assistantReplyText,
+    conversationId: convId,
+    userId,
+  });
 
   // Enrich and persist search sources if present
   let enrichedSources: Array<{

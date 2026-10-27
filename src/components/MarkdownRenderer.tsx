@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   Check,
   Copy,
@@ -12,6 +12,31 @@ interface MarkdownRendererProps {
   isRtl?: boolean;
 }
 
+/**
+ * Security helper: Sanitize Markdown link URLs to block XSS via `javascript:`,
+ * `data:`, `vbscript:`, or protocol-relative `//` URLs.
+ */
+function sanitizeMarkdownUrl(rawUrl: string): string | null {
+  const cleaned = rawUrl.replace(/[\u0000-\u001F\u007F-\u009F\s]+/g, '').trim();
+  if (!cleaned) return null;
+
+  // Allow safe relative paths (single leading slash or hash anchor)
+  if ((cleaned.startsWith('/') && !cleaned.startsWith('//')) || cleaned.startsWith('#')) {
+    return cleaned;
+  }
+
+  try {
+    const parsed = new URL(cleaned);
+    const allowedProtocols = new Set(['https:', 'http:', 'mailto:', 'tel:']);
+    if (allowedProtocols.has(parsed.protocol.toLowerCase())) {
+      return parsed.href;
+    }
+  } catch {
+    // Reject malformed or unsafe schemes
+  }
+  return null;
+}
+
 // High-Fidelity Code Block Component with Quick Copy
 const CodeBlock: React.FC<{
   content: string;
@@ -20,11 +45,48 @@ const CodeBlock: React.FC<{
 }> = ({ content, language = 'code', isRtl = true }) => {
   const [isCopied, setIsCopied] = useState(false);
   const [isWrapped, setIsWrapped] = useState(false);
+  const copyTimerRef = useRef<number | null>(null);
 
-  const copyCode = () => {
-    navigator.clipboard.writeText(content);
+  useEffect(() => {
+    return () => {
+      if (copyTimerRef.current !== null) {
+        window.clearTimeout(copyTimerRef.current);
+      }
+    };
+  }, []);
+
+  const markCopied = () => {
     setIsCopied(true);
-    setTimeout(() => setIsCopied(false), 2000);
+    if (copyTimerRef.current !== null) {
+      window.clearTimeout(copyTimerRef.current);
+    }
+    copyTimerRef.current = window.setTimeout(() => setIsCopied(false), 2000);
+  };
+
+  const copyCode = async () => {
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(content);
+        markCopied();
+        return;
+      }
+    } catch {
+      // Fallback for restricted iframe/WebView permissions
+    }
+
+    try {
+      const ta = document.createElement('textarea');
+      ta.value = content;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+      markCopied();
+    } catch {
+      // Ignore if clipboard is completely blocked
+    }
   };
 
   const cleanLang = (language || 'code').toLowerCase().trim();
@@ -398,10 +460,14 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ content, isR
         const linkMatch = lSub.match(/^\[([^\]]+)\]\(([^)]+)\)$/);
         if (linkMatch) {
           const [, linkText, linkUrl] = linkMatch;
+          const safeHref = sanitizeMarkdownUrl(linkUrl);
+          if (!safeHref) {
+            return <span key={`unsafe-link-${index}-${lIdx}`}>{linkText}</span>;
+          }
           return (
             <a
               key={`link-${index}-${lIdx}`}
-              href={linkUrl}
+              href={safeHref}
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex items-center gap-0.5 text-[var(--green)] underline hover:opacity-80 font-semibold"

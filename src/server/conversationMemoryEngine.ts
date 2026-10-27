@@ -10,7 +10,11 @@
 import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
-import type { ConversationTurn, SessionSearchSource } from './intentAndContextEngine.ts';
+import {
+  correctUserTextAndDialect,
+  type ConversationTurn,
+  type SessionSearchSource,
+} from './intentAndContextEngine.ts';
 import type { GeneratedFileMetadata } from './fileGeneratorEngine.ts';
 
 export interface StoredConversation {
@@ -329,8 +333,156 @@ export function buildMemoryPromptContext(userId = 'default_user'): string {
   const profile = getUserMemoryProfile(userId);
   if (!profile.enabled || profile.entries.length === 0) return '';
   const items = profile.entries
-    .slice(0, 12)
+    .slice(0, 16)
     .map((e) => `- ${e.key}: ${e.value}`)
     .join('\n');
-  return `[تفضيلات وذاكرة المستخدم طويلة المدى]:\n${items}`;
+  return `[تفضيلات وذاكرة المستخدم طويلة المدى والمفردات المحلية المكتسبة]:\n${items}`;
 }
+
+/* ───────────── 3. Sahrawi & Tidikelt Dialect Learning + Voice/Chat Memory ───────────── */
+
+export const SAHRAWI_TIDIKELT_DIALECT_GUIDE = `
+[دليل اللهجة الصحراوية الجزائرية المتوازنة (عين صالح، تيدكلت، أدرار، تمنراست، ورقلة، غرداية، بشار، الجنوب الجزائري) + العربية البسيطة الواضحة]:
+- تحدث دائماً بمزيج متوازن وطبيعي من الدارجة الصحراوية الجزائرية الأصيلة (لهجة أهل الجنوب الجزائري وتيدكلت وعين صالح) والعربية البسيطة الواضحة للجميع.
+- انتبه: المقصود باللهجة الصحراوية هو اللهجة الصحراوية الجزائرية حصراً (الدارجة الجزائرية الجنوبية التيدكلتية)، وليس أي لهجة خارج الجزائر.
+- استخدم عبارات الترحيب والتقدير الصحراوية الجزائرية بطبيعية وحسب السياق مثل: «مرحبا بيك خويا/أختي»، «واش حالك لاباس عليك»، «ما يكون غير الخير إن شاء الله»، «الله يحفظك ويبارك فيك»، «على سلامتك»، «بلا مزية هذا واجبنا»، «أسمعني مليح»، «درك نوضحلك»، «واش خصك»، «ربي يعاونك ويستر خطاك».
+- إذا تحدث معك الزائر بمفردات أو مصطلحات من لهجته الصحراوية الجزائرية المحلية (مثل: الفقارة، القصر، الجنان، تيدكلت، الهقار، الساهلة، العرق، الرق، الجماعة، التويزة، أتاي الصحراء)، تفاعل معها بنفس الروح واللهجة الجزائرية الصحراوية وتعلّم منها واستخدمها في ردودك.
+`.trim();
+
+/**
+ * يستخرج ويتعلم تلقائياً من كل جولة محادثة (صوتية أو نصية):
+ * 1) يصحح الأخطاء الإملائية والصوتية في اللهجة الصحراوية الجزائرية تلقائياً.
+ * 2) يحفظ الحوار في الذاكرة قصيرة المدى (سجل المحادثة النشطة + التلخيص التراكمي).
+ * 3) يلتقط المعلومات الشخصية أو التفضيلات أو الكلمات الصحراوية الجزائرية التي يعلّمها المستخدم ويحفظها في الذاكرة طويلة المدى.
+ */
+export function learnLocalDialectAndMemoryFromTurn(params: {
+  userText: string;
+  assistantText: string;
+  conversationId?: string;
+  userId?: string;
+  voicePersonaName?: string;
+}): void {
+  const rawUser = String(params.userText || '').trim();
+  const userText = correctUserTextAndDialect(rawUser) || rawUser;
+  const assistantText = String(params.assistantText || '').trim();
+  const userId = params.userId || 'default_user';
+  const convId = params.conversationId || 'voice_live_default';
+
+  if (!userText && !assistantText) return;
+
+  // 1. Save into Short-Term Conversation Memory (with automatic rolling summary)
+  if (userText) {
+    appendConversationTurn(
+      convId,
+      {
+        role: 'user',
+        content: userText,
+        timestamp: Date.now(),
+      },
+      userId
+    );
+  }
+  if (assistantText) {
+    appendConversationTurn(
+      convId,
+      {
+        role: 'assistant',
+        content: params.voicePersonaName
+          ? `[${params.voicePersonaName}]: ${assistantText}`
+          : assistantText,
+        timestamp: Date.now(),
+      },
+      userId
+    );
+  }
+
+  if (!userText) return;
+
+  // 2. Learn user's name if mentioned ("اسمي ...", "أنا اسمي ...", "عيطلي ...")
+  const nameMatch = userText.match(
+    /(?:اسمي|إسمي|انا اسمي|أنا اسمي|عيطلي|ناديني)\s+([^\s،.؟!]{2,20}(?:\s+[^\s،.؟!]{2,20})?)/i
+  );
+  if (nameMatch && nameMatch[1]) {
+    upsertUserMemoryEntry(userId, 'اسم الزائر', nameMatch[1].trim(), 'general');
+  }
+
+  // 3. Learn user's location / neighborhood / origin ("نسكن في ...", "أنا من ...")
+  const placeMatch = userText.match(
+    /(?:نسكن في|أسكن في|انا من|أنا من|حي|من قصر)\s+([^\s،.؟!]{2,25}(?:\s+[^\s،.؟!]{2,25})?)/i
+  );
+  if (placeMatch && placeMatch[1]) {
+    upsertUserMemoryEntry(userId, 'منطقة أو حي الزائر', placeMatch[1].trim(), 'general');
+  }
+
+  // 4. Learn explicit dialect definitions or user instructions ("عندنا نقولو ...", "معناها ...", "تذكر ...", "احفظ ...")
+  const teachMatch = userText.match(
+    /(?:عندنا نقولو|حنا نقولو|في لهجتنا|في تيدكلت نقولو|كلمة\s+.+\s+معناها|معناها عندنا|تذكر أن|تذكر بلي|احفظ بلي|شفا بلي)\s+(.{4,140})/i
+  );
+  if (teachMatch && teachMatch[1]) {
+    upsertUserMemoryEntry(
+      userId,
+      `معلومة أو عبارة صحراوية جزائرية علّمها الزائر (${new Date().toLocaleDateString('ar-DZ')})`,
+      userText.slice(0, 160),
+      'language'
+    );
+  }
+
+  // 5. Detect rich Algerian Saharan / Tidikelt local expressions in the user's speech and store them in learned dialect memory
+  const sahrawiExpressionsRegex =
+    /(وشحالك|واش حالك|إيوا|يا خويا|يا اختي|تيدكلت|تيديكلت|عين صالح|فقارة|القصر|الجنان|التويزة|أتاي|الصحراء|أولف|تيميمون|أدرار|تمنراست|إيليزي|ورقلة|غرداية|بشار|رقان|إنغر|فقارة الزوى|البركة|مرحبا بيك|ما يكون غير الخير|على سلامتك|واش خصك|درك|نقولك الصح|ربي يعاونك|الله يحفظك)/i;
+  if (sahrawiExpressionsRegex.test(userText) && userText.length >= 6 && userText.length <= 180) {
+    upsertUserMemoryEntry(
+      userId,
+      'عبارة بلهجة الزائر الصحراوية الجزائرية',
+      userText,
+      'language'
+    );
+  }
+}
+
+/**
+ * يبني سياق الذاكرة المدمج (الذاكرة طويلة المدى + المفردات الصحراوية المتعلمة + الذاكرة قصيرة المدى لآخر جولات الحوار)
+ * ليُحقن في كل من المكالمة الصوتية المباشرة والدردشة النصية.
+ */
+export function buildVoiceAndChatMemoryContext(params: {
+  conversationId?: string;
+  userId?: string;
+  recentTurnsLimit?: number;
+}): string {
+  const userId = params.userId || 'default_user';
+  const limit = params.recentTurnsLimit || 8;
+  const blocks: string[] = [SAHRAWI_TIDIKELT_DIALECT_GUIDE];
+
+  // 1. Long-Term Memory & Learned Sahrawi Vocabulary
+  const longTermBlock = buildMemoryPromptContext(userId);
+  if (longTermBlock) {
+    blocks.push(longTermBlock);
+  }
+
+  // 2. Short-Term Memory (Current voice/chat conversation + most recent conversation turns)
+  const convMap = getConversationsMap();
+  const targetConv =
+    (params.conversationId && convMap[params.conversationId]) ||
+    convMap['voice_live_default'] ||
+    listUserConversations(userId)[0];
+
+  if (targetConv) {
+    const shortTermLines: string[] = [];
+    if (targetConv.summary) {
+      shortTermLines.push(`ملخص سابق للمحادثة: ${targetConv.summary}`);
+    }
+    const recentMsgs = targetConv.messages.slice(-limit);
+    for (const m of recentMsgs) {
+      const speaker = m.role === 'user' ? 'الزائر' : 'المساعد';
+      shortTermLines.push(`${speaker}: ${m.content}`);
+    }
+    if (shortTermLines.length > 0) {
+      blocks.push(
+        `[الذاكرة قصيرة المدى — سياق المحادثة الأخيرة للاستفادة منه في الرد]:\n${shortTermLines.join('\n')}`
+      );
+    }
+  }
+
+  return blocks.join('\n\n');
+}
+

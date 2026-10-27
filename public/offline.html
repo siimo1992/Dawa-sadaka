@@ -141,7 +141,10 @@
         <a class="call-btn" href="tel:1548">1548 <span>الأمن الوطني</span></a>
       </div>
       <div id="gps-out" class="gps-box">اضغط لتحديد إحداثيات GPS الخاصة بك عبر القمر الصناعي</div>
-      <button class="retry-btn" style="background:#f59e0b; margin-top:0.5rem;" onclick="getOfflineGps()">📍 استخراج إحداثيات GPS الآن</button>
+      <div style="display: flex; gap: 0.5rem; margin-top: 0.5rem;">
+        <button class="retry-btn" style="background:#f59e0b; margin-top:0; flex: 1;" onclick="getOfflineGps()">📍 استخراج إحداثيات GPS الآن</button>
+        <button id="copy-gps-btn" class="retry-btn" style="background:#1e293b; color:#f1f5f9; border: 1px solid #334155; margin-top:0; width: auto; padding: 0.85rem 1rem; display: none;" onclick="copyOfflineGps()">📋 نسخ الإحداثيات</button>
+      </div>
     </div>
 
     <div class="card">
@@ -164,8 +167,12 @@
     <button class="retry-btn" onclick="window.location.reload()">🔄 إعادة المحاولة والاتصال بالتطبيق</button>
 
     <script>
+      var lastCoordsText = '';
+
       function getOfflineGps() {
         var box = document.getElementById('gps-out');
+        var copyBtn = document.getElementById('copy-gps-btn');
+        if (!box) return;
         if (!navigator.geolocation) {
           box.textContent = 'جهازك لا يدعم GPS المباشر';
           return;
@@ -173,16 +180,57 @@
         box.textContent = 'جاري التقاط إشارة الأقمار الصناعية GPS...';
         navigator.geolocation.getCurrentPosition(
           function (pos) {
-            var lat = pos.coords.latitude.toFixed(5);
-            var lon = pos.coords.longitude.toFixed(5);
-            var acc = Math.round(pos.coords.accuracy);
-            box.innerHTML = 'الإحداثيات: <strong>' + lat + ', ' + lon + '</strong> (الدقة: ±' + acc + 'م)';
+            var lat = Number(pos.coords.latitude).toFixed(5);
+            var lon = Number(pos.coords.longitude).toFixed(5);
+            var acc = Math.round(Number(pos.coords.accuracy) || 0);
+            lastCoordsText = lat + ', ' + lon;
+
+            box.textContent = '';
+            box.appendChild(document.createTextNode('الإحداثيات: '));
+            var strongEl = document.createElement('strong');
+            strongEl.dir = 'ltr';
+            strongEl.textContent = lastCoordsText;
+            box.appendChild(strongEl);
+            box.appendChild(document.createTextNode(' (الدقة: ±' + acc + 'م)'));
+
+            if (copyBtn) {
+              copyBtn.style.display = 'inline-block';
+              copyBtn.textContent = '📋 نسخ الإحداثيات';
+            }
           },
           function () {
             box.textContent = 'تعذر التقاط الإحداثيات، تأكد من تفعيل الموقع (Location) في الهاتف.';
           },
-          { enableHighAccuracy: true, timeout: 10000 }
+          { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
         );
+      }
+
+      function copyOfflineGps() {
+        if (!lastCoordsText) return;
+        var copyBtn = document.getElementById('copy-gps-btn');
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(lastCoordsText).then(function () {
+            if (copyBtn) copyBtn.textContent = '✅ تم النسخ';
+          }).catch(function () {
+            fallbackCopyGps(lastCoordsText, copyBtn);
+          });
+        } else {
+          fallbackCopyGps(lastCoordsText, copyBtn);
+        }
+      }
+
+      function fallbackCopyGps(text, btn) {
+        try {
+          var ta = document.createElement('textarea');
+          ta.value = text;
+          ta.style.position = 'fixed';
+          ta.style.opacity = '0';
+          document.body.appendChild(ta);
+          ta.select();
+          document.execCommand('copy');
+          document.body.removeChild(ta);
+          if (btn) btn.textContent = '✅ تم النسخ';
+        } catch (_) {}
       }
     </script>
   </body>

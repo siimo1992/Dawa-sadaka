@@ -699,7 +699,7 @@ export const CommunityNewsPage: React.FC<CommunityNewsPageProps> = ({
         </defs>
       </svg>
 
-      {/* Top Sticky Bar */}
+      {/* Top Sticky Bar — Simplified & Optimized for Mobile */}
       <header className="bar">
         <div className="bar-in">
           <div className="brand">
@@ -723,32 +723,37 @@ export const CommunityNewsPage: React.FC<CommunityNewsPageProps> = ({
               title="العودة إلى المحادثة الذكية"
               aria-label="تيديكلت AI"
             >
-              TA
+              <img
+                src="/icon.svg"
+                alt="TA"
+                referrerPolicy="no-referrer"
+                className="w-full h-full object-cover rounded-[9px]"
+              />
             </button>
             <div className="brand-info">
-              <span className="brand-title">كاش ما تعرف · محليات</span>
+              <span className="brand-title">كاش ما تعرف</span>
               <span className="loc" id="loc" title="أخبار ومستجدات المجتمع المحلي">
                 <svg className="i i-12 text-[var(--green)]" aria-hidden="true">
                   <use href="#i-pin" />
                 </svg>
-                <span id="locT" className="font-bold">كل الولايات</span>
+                <span id="locT" className="font-bold">منشورات المجتمع المحلي</span>
               </span>
             </div>
           </div>
 
           <div className="bar-actions">
-            {isAdminMode && (
+            {onOpenRafiq && (
               <button
-                className="ib"
-                id="pBtn"
                 type="button"
-                aria-label="لوحة التحكم"
-                title="لوحة تحكم المشرف والمالك"
-                onClick={() => setIsAdminPanelOpen(true)}
+                className="rafiq-switch-btn"
+                aria-label="الانتقال إلى قسم الرحالة (كاش بلاصة معك)"
+                title="كاش بلاصة معك · الرحالة"
+                onClick={onOpenRafiq}
               >
-                <svg className="i">
-                  <use href="#i-panel" />
+                <svg className="i i-16" aria-hidden="true">
+                  <use href="#i-wheel" />
                 </svg>
+                <span>الرحالة</span>
               </button>
             )}
 
@@ -773,36 +778,30 @@ export const CommunityNewsPage: React.FC<CommunityNewsPageProps> = ({
               </svg>
             </button>
 
-            <button
-              className="ib"
-              id="bBtn"
-              type="button"
-              aria-label="التنبيهات"
-              aria-pressed={notificationsOn}
-              onClick={() => {
-                const next = !notificationsOn;
-                setNotificationsOn(next);
-                showToast(
-                  next ? 'فُعّلت التنبيهات (معاينة)' : 'أُوقفت التنبيهات (معاينة)'
-                );
-              }}
-            >
-              <svg className="i">
-                <use href="#i-bell" />
-              </svg>
-            </button>
+            {isAdminMode && (
+              <button
+                className="ib"
+                id="pBtn"
+                type="button"
+                aria-label="لوحة التحكم"
+                title="لوحة تحكم المشرف والمالك"
+                onClick={() => setIsAdminPanelOpen(true)}
+              >
+                <svg className="i">
+                  <use href="#i-panel" />
+                </svg>
+              </button>
+            )}
 
             <button
-              type="button"
               className="ib"
-              aria-label="كاش بلاصة معك (Kash Bilasa)"
-              title="كاش بلاصة معك (Kash Bilasa)"
-              onClick={() => {
-                if (onOpenRafiq) onOpenRafiq();
-              }}
+              type="button"
+              aria-label="العودة للمحادثة"
+              title="العودة إلى المحادثة الذكية"
+              onClick={onBackToChat}
             >
-              <svg className="i">
-                <use href="#i-wheel" />
+              <svg className="i" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M19 12H5M11 6l-6 6 6 6" />
               </svg>
             </button>
           </div>
@@ -819,10 +818,22 @@ export const CommunityNewsPage: React.FC<CommunityNewsPageProps> = ({
               type="search"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="ابحث في الأخبار"
+              placeholder="ابحث في المنشورات أو الأحياء..."
               aria-label="ابحث في الأخبار"
               autoComplete="off"
             />
+            {searchQuery && (
+              <button
+                type="button"
+                className="clear-search-btn"
+                onClick={() => setSearchQuery('')}
+                aria-label="مسح البحث"
+              >
+                <svg className="i i-14">
+                  <use href="#i-x" />
+                </svg>
+              </button>
+            )}
           </label>
         </div>
       </header>
@@ -845,8 +856,20 @@ export const CommunityNewsPage: React.FC<CommunityNewsPageProps> = ({
               type="button"
               onClick={openComposer}
             >
-              شارك خبرًا أو إعلانًا مع المجتمع المحلي
+              شارك خبرًا أو استفسارًا مع أهل المنطقة...
             </button>
+            {!isComposerOpen && (
+              <button
+                type="button"
+                className="quick-post-btn"
+                onClick={openComposer}
+              >
+                <svg className="i i-16" aria-hidden="true">
+                  <use href="#i-plus" />
+                </svg>
+                <span>نشر</span>
+              </button>
+            )}
           </div>
           <div className="c-more">
             <textarea
@@ -856,7 +879,7 @@ export const CommunityNewsPage: React.FC<CommunityNewsPageProps> = ({
               value={composerText}
               onChange={(e) => setComposerText(e.target.value)}
               aria-label="نص الخبر"
-              placeholder="اكتب الخبر بوضوح"
+              placeholder="اكتب الخبر أو الإعلان بوضوح..."
             />
             <div className="grid2">
               <label className="field">
@@ -887,7 +910,7 @@ export const CommunityNewsPage: React.FC<CommunityNewsPageProps> = ({
                   value={composerPlace}
                   onChange={(e) => setComposerPlace(e.target.value)}
                   aria-label="الحي أو البلدية"
-                  placeholder="الحي (اختياري)"
+                  placeholder="الحي أو القصر (اختياري)"
                 />
               </label>
             </div>
@@ -952,6 +975,13 @@ export const CommunityNewsPage: React.FC<CommunityNewsPageProps> = ({
                 </button>
               </span>
               <button
+                type="button"
+                className="cancel-compose-btn"
+                onClick={() => setIsComposerOpen(false)}
+              >
+                إلغاء
+              </button>
+              <button
                 className="send"
                 id="pub"
                 type="button"
@@ -960,7 +990,7 @@ export const CommunityNewsPage: React.FC<CommunityNewsPageProps> = ({
                 <svg className="i">
                   <use href="#i-send" />
                 </svg>
-                نشر
+                نشر الخبر
               </button>
             </div>
           </div>
@@ -1003,8 +1033,8 @@ export const CommunityNewsPage: React.FC<CommunityNewsPageProps> = ({
             <svg className="i i-16" aria-hidden="true">
               <use href="#i-news" />
             </svg>
-            {filteredPosts.length}
-            {filteredPosts.length === 1 ? ' منشور' : ' منشورات'}
+            <b>{filteredPosts.length}</b>
+            <span>{filteredPosts.length === 1 ? 'منشور معروض' : 'منشورات معروضة'}</span>
           </span>
           <button
             className="sort"
@@ -1015,7 +1045,7 @@ export const CommunityNewsPage: React.FC<CommunityNewsPageProps> = ({
             <svg className="i i-16" aria-hidden="true">
               <use href={sortBy === 'new' ? '#i-clock' : '#i-thumb'} />
             </svg>
-            {sortBy === 'new' ? 'الأحدث' : 'الأكثر نفعًا'}
+            <span>الترتيب: {sortBy === 'new' ? 'الأحدث' : 'الأكثر نفعًا'}</span>
           </button>
         </div>
 
@@ -1042,7 +1072,7 @@ export const CommunityNewsPage: React.FC<CommunityNewsPageProps> = ({
               return (
                 <article
                   key={p.id}
-                  className={`card${u.banned ? ' banned' : ''}`}
+                  className={`card cat-${p.cat}${u.banned ? ' banned' : ''}`}
                   data-id={p.id}
                 >
                   <div className="head">
@@ -1054,7 +1084,7 @@ export const CommunityNewsPage: React.FC<CommunityNewsPageProps> = ({
                     </span>
                     <div className="who">
                       <div className="line">
-                        <span>{u.name}</span>
+                        <span className="author-name">{u.name}</span>
                         {u.verified && (
                           <span className="ok" title="موثّق" aria-label="موثّق">
                             <svg className="i i-16" aria-hidden="true">
@@ -1067,14 +1097,21 @@ export const CommunityNewsPage: React.FC<CommunityNewsPageProps> = ({
                         {u.banned && <span className="pill ban">محظور</span>}
                       </div>
                       <div className="meta">
-                        {ago(p.ts)}
-                        {p.edited ? ' · عُدّل' : ''}
-                        {p.place ? ` · ${p.place}` : ''}
+                        <span>{ago(p.ts)}</span>
+                        {p.edited && <span> · عُدّل</span>}
+                        {p.place && (
+                          <span className="place-tag">
+                            <svg className="i i-12" aria-hidden="true">
+                              <use href="#i-pin" />
+                            </svg>
+                            {p.place}
+                          </span>
+                        )}
                       </div>
                     </div>
 
                     <div className="head-end">
-                      <span className="cat">
+                      <span className={`cat cat-badge-${p.cat}`}>
                         <svg className="i" aria-hidden="true">
                           <use href={`#i-${c[0]}`} />
                         </svg>
@@ -1232,7 +1269,7 @@ export const CommunityNewsPage: React.FC<CommunityNewsPageProps> = ({
 
                   {p.source && (
                     <div className="src">
-                      <svg className="i i-16" aria-hidden="true">
+                      <svg className="i i-14" aria-hidden="true">
                         <use href="#i-link" />
                       </svg>
                       <span>
@@ -1259,10 +1296,11 @@ export const CommunityNewsPage: React.FC<CommunityNewsPageProps> = ({
                       aria-label="مفيد"
                       onClick={() => handleToggleLike(p.id)}
                     >
-                      <svg className="i" aria-hidden="true">
+                      <svg className="i i-16" aria-hidden="true">
                         <use href="#i-thumb" />
                       </svg>
-                      <span>{p.likes + (liked ? 1 : 0)}</span>
+                      <span className="act-lbl">مفيد</span>
+                      <b className="act-cnt">{p.likes + (liked ? 1 : 0)}</b>
                     </button>
 
                     <button
@@ -1272,10 +1310,11 @@ export const CommunityNewsPage: React.FC<CommunityNewsPageProps> = ({
                       aria-label="التعليقات"
                       onClick={() => handleToggleComments(p.id)}
                     >
-                      <svg className="i" aria-hidden="true">
+                      <svg className="i i-16" aria-hidden="true">
                         <use href="#i-chat" />
                       </svg>
-                      <span>{p.comments.length}</span>
+                      <span className="act-lbl">تعليق</span>
+                      <b className="act-cnt">{p.comments.length}</b>
                     </button>
 
                     <button
@@ -1284,18 +1323,20 @@ export const CommunityNewsPage: React.FC<CommunityNewsPageProps> = ({
                       aria-label="مشاركة"
                       onClick={() => handleShare(p)}
                     >
-                      <svg className="i" aria-hidden="true">
+                      <svg className="i i-16" aria-hidden="true">
                         <use href="#i-share" />
                       </svg>
+                      <span className="act-lbl">مشاركة</span>
                     </button>
 
                     <button
                       className="act end"
                       type="button"
                       aria-label="إبلاغ"
-                      onClick={() => showToast('تم تسجيل البلاغ (معاينة)')}
+                      title="إبلاغ عن المنشور"
+                      onClick={() => showToast('تم تسجيل البلاغ للمراجعة')}
                     >
-                      <svg className="i" aria-hidden="true">
+                      <svg className="i i-16" aria-hidden="true">
                         <use href="#i-flag" />
                       </svg>
                     </button>
@@ -1314,7 +1355,7 @@ export const CommunityNewsPage: React.FC<CommunityNewsPageProps> = ({
                       >
                         <input
                           aria-label="اكتب تعليقًا"
-                          placeholder="اكتب تعليقًا"
+                          placeholder="اكتب تعليقًا مفيدًا..."
                           maxLength={240}
                           required
                           value={commentInputs[p.id] || ''}
@@ -1326,7 +1367,7 @@ export const CommunityNewsPage: React.FC<CommunityNewsPageProps> = ({
                           }
                         />
                         <button type="submit" aria-label="إرسال">
-                          <svg className="i" aria-hidden="true">
+                          <svg className="i i-16" aria-hidden="true">
                             <use href="#i-send" />
                           </svg>
                         </button>
@@ -1609,18 +1650,20 @@ export const CommunityNewsPage: React.FC<CommunityNewsPageProps> = ({
 
 
 
-      {/* Floating Action Button */}
-      <button
-        className="fab"
-        id="fab"
-        type="button"
-        aria-label="منشور جديد"
-        onClick={openComposer}
-      >
-        <svg className="i i-24" aria-hidden="true">
-          <use href="#i-plus" />
-        </svg>
-      </button>
+      {/* Floating Action Button (Hidden when composer is open) */}
+      {!isComposerOpen && (
+        <button
+          className="fab"
+          id="fab"
+          type="button"
+          aria-label="منشور جديد"
+          onClick={openComposer}
+        >
+          <svg className="i i-24" aria-hidden="true">
+            <use href="#i-plus" />
+          </svg>
+        </button>
+      )}
 
       {/* Toast Notification */}
       <div

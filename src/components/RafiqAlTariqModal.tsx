@@ -37,6 +37,8 @@ interface RafiqAlTariqModalProps {
   isAdminLoggedIn?: boolean;
   embedded?: boolean;
   onBackToChat?: () => void;
+  onToggleSidebar?: () => void;
+  onOpenNews?: () => void;
 }
 
 const iso = (d: Date) =>
@@ -127,6 +129,8 @@ export const RafiqAlTariqModal: React.FC<RafiqAlTariqModalProps> = ({
   isAdminLoggedIn = false,
   embedded = false,
   onBackToChat,
+  onToggleSidebar,
+  onOpenNews,
 }) => {
   const ME = 'u0';
   const [drivers, setDrivers] = useState<RafiqDriverUser[]>(INITIAL_DRIVERS);
@@ -180,8 +184,8 @@ export const RafiqAlTariqModal: React.FC<RafiqAlTariqModalProps> = ({
   const toastTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
-    if (isAdminLoggedIn) {
-      setIsAdminMode(true);
+    if (!isAdminLoggedIn) {
+      setIsAdminPanelOpen(false);
     }
   }, [isAdminLoggedIn]);
 
@@ -779,56 +783,97 @@ export const RafiqAlTariqModal: React.FC<RafiqAlTariqModalProps> = ({
             <path d="M12 3l8 3v6c0 4.5-3.2 8-8 9-4.8-1-8-4.5-8-9V6z" />
             <path d="m8.8 12 2.2 2.2 4.2-4.4" />
           </symbol>
+          <symbol id="i-menu" viewBox="0 0 24 24">
+            <path d="M4 6h16M4 12h16M4 18h16" />
+          </symbol>
+          <symbol id="i-news" viewBox="0 0 24 24">
+            <path d="M4 5h12v14a2 2 0 0 0 2 2H6a2 2 0 0 1-2-2zm12 3h4v11a2 2 0 0 1-2 2M8 9h4M8 13h6M8 17h4" />
+          </symbol>
         </defs>
       </svg>
 
-      {/* Top Sticky Bar */}
+      {/* Top Sticky Bar — Unified & Mobile-Optimized */}
       <header className="bar">
         <div className="bar-in">
           <div className="brand">
+            {onToggleSidebar && (
+              <button
+                type="button"
+                className="icon-btn"
+                onClick={onToggleSidebar}
+                aria-label="القائمة الجانبية"
+                title="القائمة الجانبية"
+              >
+                <Icon name="menu" />
+              </button>
+            )}
             <span className="mark">
               <Icon name="wheel" />
             </span>
-            <span title="Kash Bilasa">{lang === 'ar' ? 'كاش بلاصة معك' : 'Kash Bilasa'}</span>
+            <div className="brand-text">
+              <span className="brand-title" title="Kash Bilasa">
+                {lang === 'ar' ? 'كاش بلاصة · الرحالة' : 'Kash Bilasa'}
+              </span>
+              <span className="brand-sub">مرافقة السفر ومشاركة الطريق</span>
+            </div>
           </div>
-          <button
-            className="icon-btn"
-            id="pBtn"
-            type="button"
-            hidden={!isAdminMode}
-            onClick={() => setIsAdminPanelOpen(true)}
-            aria-label="لوحة تحكم المالك"
-            title="لوحة تحكم المالك"
-          >
-            <Icon name="panel" />
-          </button>
-          <button
-            className="icon-btn"
-            id="helpBtn"
-            type="button"
-            onClick={() => setIsHelpOpen(true)}
-            aria-label="كيف تعمل الخدمة؟"
-          >
-            <Icon name="help" />
-          </button>
-          <button
-            className="pub"
-            id="pubBtn"
-            type="button"
-            onClick={openPublishModalForNew}
-          >
-            <Icon name="plus" />
-            انشر
-          </button>
-          <button
-            className="icon-btn"
-            type="button"
-            onClick={onBackToChat || onClose}
-            aria-label={embedded ? 'العودة إلى المحادثة' : 'إغلاق'}
-            title={embedded ? 'العودة إلى المحادثة الذكية' : 'العودة إلى المحادثة'}
-          >
-            {embedded ? <Icon name="arrow" /> : <Icon name="x" />}
-          </button>
+
+          <div className="bar-actions">
+            {onOpenNews && (
+              <button
+                type="button"
+                className="news-switch-btn"
+                onClick={onOpenNews}
+                title="الانتقال إلى منشورات كاش ما تعرف"
+              >
+                <Icon name="news" />
+                <span>كاش ما تعرف</span>
+              </button>
+            )}
+
+            <button
+              className="pub"
+              id="pubBtn"
+              type="button"
+              onClick={openPublishModalForNew}
+            >
+              <Icon name="plus" />
+              <span>انشر رحلة</span>
+            </button>
+
+            <button
+              className="icon-btn"
+              id="helpBtn"
+              type="button"
+              onClick={() => setIsHelpOpen(true)}
+              aria-label="كيف تعمل الخدمة؟"
+              title="كيف تعمل الخدمة؟"
+            >
+              <Icon name="help" />
+            </button>
+
+            <button
+              className="icon-btn"
+              id="pBtn"
+              type="button"
+              hidden={!isAdminMode}
+              onClick={() => setIsAdminPanelOpen(true)}
+              aria-label="لوحة تحكم المالك"
+              title="لوحة تحكم المالك"
+            >
+              <Icon name="panel" />
+            </button>
+
+            <button
+              className="icon-btn"
+              type="button"
+              onClick={onBackToChat || onClose}
+              aria-label={embedded ? 'العودة إلى المحادثة' : 'إغلاق'}
+              title={embedded ? 'العودة إلى المحادثة الذكية' : 'العودة إلى المحادثة'}
+            >
+              {embedded ? <Icon name="arrow" /> : <Icon name="x" />}
+            </button>
+          </div>
         </div>
       </header>
 
@@ -850,14 +895,14 @@ export const RafiqAlTariqModal: React.FC<RafiqAlTariqModalProps> = ({
               <input
                 id="from"
                 aria-label="من"
-                placeholder="من أين؟"
+                placeholder="نقطة الانطلاق (مثلاً: عين صالح)"
                 value={fromVal}
                 onChange={(e) => setFromVal(e.target.value)}
               />
               <input
                 id="to"
                 aria-label="إلى"
-                placeholder="إلى أين؟"
+                placeholder="الوجهة (مثلاً: تمنراست، أدرار...)"
                 value={toVal}
                 onChange={(e) => setToVal(e.target.value)}
               />
@@ -868,10 +913,56 @@ export const RafiqAlTariqModal: React.FC<RafiqAlTariqModalProps> = ({
               type="button"
               onClick={handleSwap}
               aria-label="تبديل الانطلاق والوجهة"
+              title="تبديل الانطلاق والوجهة"
             >
               <Icon name="swap" />
             </button>
           </div>
+
+          {/* Quick Popular Routes for 1-Tap Mobile Selection */}
+          <div className="quick-routes" aria-label="خطوط سريعة">
+            <button
+              type="button"
+              className={`qroute${!fromVal && !toVal ? ' active' : ''}`}
+              onClick={() => {
+                setFromVal('');
+                setToVal('');
+                setDateVal('');
+              }}
+            >
+              كل الخطوط
+            </button>
+            {[
+              ['عين صالح', 'تمنراست'],
+              ['عين صالح', 'أدرار'],
+              ['عين صالح', 'الجزائر'],
+              ['عين صالح', 'غرداية'],
+              ['عين صالح', 'ورقلة'],
+            ].map(([f, tDest]) => {
+              const isSelected = fromVal === f && toVal === tDest;
+              return (
+                <button
+                  key={`${f}-${tDest}`}
+                  type="button"
+                  className={`qroute${isSelected ? ' active' : ''}`}
+                  onClick={() => {
+                    if (isSelected) {
+                      setFromVal('');
+                      setToVal('');
+                    } else {
+                      setFromVal(f);
+                      setToVal(tDest);
+                    }
+                  }}
+                >
+                  <span>{f}</span>
+                  <span className="qroute-arrow">←</span>
+                  <span>{tDest}</span>
+                </button>
+              );
+            })}
+          </div>
+
           <div className="row2">
             <label className="cf date">
               <Icon name="cal" />
@@ -892,16 +983,33 @@ export const RafiqAlTariqModal: React.FC<RafiqAlTariqModalProps> = ({
                 value={paxVal}
                 onChange={(e) => setPaxVal(Number(e.target.value))}
               >
-                <option value={1}>1</option>
-                <option value={2}>2</option>
-                <option value={3}>3</option>
-                <option value={4}>4</option>
+                <option value={1}>1 مقعد</option>
+                <option value={2}>2 مقاعد</option>
+                <option value={3}>3 مقاعد</option>
+                <option value={4}>4 مقاعد</option>
               </select>
             </label>
-            <button className="go" type="submit" aria-label="بحث">
-              <Icon name="search" />
-              <span className="search-label">بحث</span>
-            </button>
+            {(fromVal || toVal || dateVal || paxVal > 1) ? (
+              <button
+                className="go reset-btn"
+                type="button"
+                onClick={() => {
+                  setFromVal('');
+                  setToVal('');
+                  setDateVal('');
+                  setPaxVal(1);
+                }}
+                aria-label="إلغاء الفلترة"
+              >
+                <Icon name="x" />
+                <span className="search-label">مسح</span>
+              </button>
+            ) : (
+              <button className="go" type="submit" aria-label="بحث">
+                <Icon name="search" />
+                <span className="search-label">بحث</span>
+              </button>
+            )}
           </div>
         </form>
 
@@ -934,7 +1042,7 @@ export const RafiqAlTariqModal: React.FC<RafiqAlTariqModalProps> = ({
             onClick={() => setFlt('fuel')}
           >
             <Icon name="fuel" />
-            وقود
+            تشارك وقود
           </button>
           <button
             className="chip"
@@ -961,21 +1069,39 @@ export const RafiqAlTariqModal: React.FC<RafiqAlTariqModalProps> = ({
         <div className="notice" role="note">
           <Icon name="shield" />
           <span>
-            المنصة وسيط فقط بين السائق والراكب، ولا تتحمل أي مسؤولية عن الرحلات. سافر بحيطة وحذر.
+            المنصة وسيط محلي للتنسيق بين المسافرين والسائقين. تواصل مباشرة وتأكد من التفاصيل قبل الانطلاق.
           </span>
         </div>
 
-        <div className="count" id="count" aria-live="polite">
-          <Icon name="list" />
-          {filteredList.length}
-          {filteredList.length === 1 ? ' رحلة' : ' رحلات'}
+        <div className="count-bar">
+          <div className="count" id="count" aria-live="polite">
+            <Icon name="car" />
+            <b>{filteredList.length}</b>
+            <span>{filteredList.length === 1 ? 'رحلة متوفرة' : 'رحلات متوفرة'}</span>
+          </div>
+          <button
+            type="button"
+            className="inline-add-ride"
+            onClick={openPublishModalForNew}
+          >
+            <Icon name="plus" />
+            <span>إضافة رحلتك</span>
+          </button>
         </div>
 
         <div className="list" id="list">
           {filteredList.length === 0 ? (
             <div className="empty">
               <Icon name="search" />
-              <div>لا توجد رحلات على هذا الخط</div>
+              <div>لا توجد رحلات مطابقة لهذا المسار حالياً</div>
+              <button
+                type="button"
+                className="pub mt-2"
+                onClick={openPublishModalForNew}
+              >
+                <Icon name="plus" />
+                انشر أول رحلة على هذا الخط
+              </button>
             </div>
           ) : (
             filteredList.map((r) => {
@@ -991,7 +1117,7 @@ export const RafiqAlTariqModal: React.FC<RafiqAlTariqModalProps> = ({
 
               return (
                 <article
-                  className={`card${isBanned ? ' banned' : ''}`}
+                  className={`card${isBanned ? ' banned' : ''}${r.seats < 1 ? ' full-ride' : ''}`}
                   key={r.id}
                   data-id={r.id}
                 >
@@ -1001,9 +1127,11 @@ export const RafiqAlTariqModal: React.FC<RafiqAlTariqModalProps> = ({
                       <small>{dayLabel(r.date)}</small>
                     </div>
                     <div className="route">
-                      <span>{r.from}</span>
-                      <Icon name="arrow" />
-                      <span>{r.to}</span>
+                      <span className="city-from">{r.from}</span>
+                      <span className="route-arrow">
+                        <Icon name="arrow" />
+                      </span>
+                      <span className="city-to">{r.to}</span>
                     </div>
                     {priceVal === 0 ? (
                       <div className="price free">مجانًا</div>
@@ -1019,32 +1147,47 @@ export const RafiqAlTariqModal: React.FC<RafiqAlTariqModalProps> = ({
                       <Icon name={typeMeta[0]} />
                       {typeMeta[1]}
                     </span>
-                    <span className="m" aria-label="المقاعد المتاحة">
+                    <span className={`seats-pill${r.seats < 1 ? ' none' : ''}`} aria-label="المقاعد المتاحة">
                       <Icon name="users" />
-                      {r.seats}
+                      <span>
+                        {r.seats < 1 ? 'مكتمل العدد' : `${r.seats} ${r.seats === 1 ? 'مقعد متاح' : 'مقاعد متاحة'}`}
+                      </span>
                     </span>
+                    {r.car && (
+                      <span className="car-pill">
+                        <Icon name="car" />
+                        <span>{r.car}</span>
+                      </span>
+                    )}
                     {r.edited && <span className="badge-pill">عُدّل</span>}
                     {r.review && <span className="badge-pill rev">قيد المراجعة</span>}
                     {isBanned && <span className="badge-pill ban">محظور</span>}
                   </div>
 
+                  {r.note && !isOpenExtra && (
+                    <div className="note-preview" onClick={() => handleToggleExtra(r.id)}>
+                      <Icon name="pin" />
+                      <span>{r.note}</span>
+                    </div>
+                  )}
+
                   {isOpenExtra && (
                     <div className="extra">
                       <div>
                         <Icon name="car" />
-                        {r.car}
+                        <span>المركبة: <b>{r.car}</b></span>
                       </div>
                       {r.note ? (
                         <div>
                           <Icon name="pin" />
-                          {r.note}
+                          <span>ملاحظة: {r.note}</span>
                         </div>
                       ) : null}
                       {r.phone ? (
                         <div className="contact">
                           <a className="cbtn call" href={`tel:+213${r.phone.slice(1)}`}>
                             <Icon name="phone" />
-                            اتصال
+                            اتصال هاتفي
                           </a>
                           <a
                             className="cbtn wa"
@@ -1053,7 +1196,7 @@ export const RafiqAlTariqModal: React.FC<RafiqAlTariqModalProps> = ({
                             rel="noopener noreferrer"
                           >
                             <Icon name="chat" />
-                            واتساب
+                            مراسلة واتساب
                           </a>
                         </div>
                       ) : null}
@@ -1065,129 +1208,146 @@ export const RafiqAlTariqModal: React.FC<RafiqAlTariqModalProps> = ({
                   )}
 
                   <div className="foot">
-                    <span className="avatar">{(r.who || 'س').charAt(0)}</span>
-                    <span>{r.who}</span>
-                    {isVerified ? (
-                      <span className="ok" title="موثّق" aria-label="موثّق">
-                        <Icon name="check" />
-                      </span>
-                    ) : null}
+                    <div className="driver-info">
+                      <span className="avatar">{(r.who || 'س').charAt(0)}</span>
+                      <span className="driver-name">{r.who}</span>
+                      {isVerified ? (
+                        <span className="ok" title="موثّق" aria-label="موثّق">
+                          <Icon name="check" />
+                        </span>
+                      ) : null}
+                    </div>
 
                     <div className="spacer" />
 
-                    {showMenu && (
-                      <div className="menu-wrap">
-                        <button
-                          className="menu-btn"
-                          type="button"
-                          aria-haspopup="menu"
-                          aria-expanded={isMenuOpen}
-                          aria-label="خيارات الرحلة"
-                          title="خيارات الرحلة"
-                          onClick={() =>
-                            setOpenMenuRideId((prev) =>
-                              prev === r.id ? null : r.id
-                            )
-                          }
-                        >
-                          <Icon name="dots" />
-                        </button>
+                    <div className="foot-actions">
+                      {showMenu && (
+                        <div className="menu-wrap">
+                          <button
+                            className="menu-btn"
+                            type="button"
+                            aria-haspopup="menu"
+                            aria-expanded={isMenuOpen}
+                            aria-label="خيارات الرحلة"
+                            title="خيارات الرحلة"
+                            onClick={() =>
+                              setOpenMenuRideId((prev) =>
+                                prev === r.id ? null : r.id
+                              )
+                            }
+                          >
+                            <Icon name="dots" />
+                          </button>
 
-                        <div
-                          className={`pop${isMenuOpen ? ' show' : ''}`}
-                          role="menu"
-                        >
-                          {(isMine || isAdminMode) && (
-                            <button
-                              type="button"
-                              role="menuitem"
-                              onClick={() => handleMenuAction(r, 'edit')}
-                            >
-                              <Icon name="edit" />
-                              تعديل الرحلة
-                            </button>
-                          )}
-                          {(isMine || isAdminMode) && (
-                            <button
-                              type="button"
-                              role="menuitem"
-                              className="danger"
-                              onClick={() => handleMenuAction(r, 'del')}
-                            >
-                              <Icon name="trash" />
-                              حذف الرحلة
-                            </button>
-                          )}
-                          {isAdminMode && (
-                            <>
-                              <hr />
-                              <div className="lbl">
-                                <Icon name="shieldok" />
-                                صلاحيات المالك
-                              </div>
-                              {r.review && (
-                                <button
-                                  type="button"
-                                  role="menuitem"
-                                  onClick={() => handleMenuAction(r, 'ok')}
-                                >
-                                  <Icon name="check" />
-                                  اعتماد النشر
-                                </button>
-                              )}
+                          <div
+                            className={`pop${isMenuOpen ? ' show' : ''}`}
+                            role="menu"
+                          >
+                            {(isMine || isAdminMode) && (
                               <button
                                 type="button"
                                 role="menuitem"
-                                onClick={() => handleMenuAction(r, 'verify')}
+                                onClick={() => handleMenuAction(r, 'edit')}
                               >
-                                <Icon name="shieldok" />
-                                {isVerified
-                                  ? 'نزع علامة التوثيق'
-                                  : 'منح علامة التوثيق'}
+                                <Icon name="edit" />
+                                تعديل الرحلة
                               </button>
-                              {r.uid !== ME && (
+                            )}
+                            {(isMine || isAdminMode) && (
+                              <button
+                                type="button"
+                                role="menuitem"
+                                className="danger"
+                                onClick={() => handleMenuAction(r, 'del')}
+                              >
+                                <Icon name="trash" />
+                                حذف الرحلة
+                              </button>
+                            )}
+                            {isAdminMode && (
+                              <>
+                                <hr />
+                                <div className="lbl">
+                                  <Icon name="shieldok" />
+                                  صلاحيات المالك
+                                </div>
+                                {r.review && (
+                                  <button
+                                    type="button"
+                                    role="menuitem"
+                                    onClick={() => handleMenuAction(r, 'ok')}
+                                  >
+                                    <Icon name="check" />
+                                    اعتماد النشر
+                                  </button>
+                                )}
                                 <button
                                   type="button"
                                   role="menuitem"
-                                  className={!isBanned ? 'danger' : ''}
-                                  onClick={() => handleMenuAction(r, 'ban')}
+                                  onClick={() => handleMenuAction(r, 'verify')}
                                 >
-                                  <Icon name="ban" />
-                                  {isBanned
-                                    ? 'إلغاء حظر السائق'
-                                    : 'حظر السائق'}
+                                  <Icon name="shieldok" />
+                                  {isVerified
+                                    ? 'نزع علامة التوثيق'
+                                    : 'منح علامة التوثيق'}
                                 </button>
-                              )}
-                            </>
-                          )}
+                                {r.uid !== ME && (
+                                  <button
+                                    type="button"
+                                    role="menuitem"
+                                    className={!isBanned ? 'danger' : ''}
+                                    onClick={() => handleMenuAction(r, 'ban')}
+                                  >
+                                    <Icon name="ban" />
+                                    {isBanned
+                                      ? 'إلغاء حظر السائق'
+                                      : 'حظر السائق'}
+                                  </button>
+                                )}
+                              </>
+                            )}
+                          </div>
                         </div>
-                      </div>
-                    )}
-
-                    <button
-                      className="more"
-                      type="button"
-                      aria-expanded={isOpenExtra}
-                      aria-label="التفاصيل"
-                      onClick={() => handleToggleExtra(r.id)}
-                    >
-                      <Icon name="down" />
-                    </button>
-                    <button
-                      className="book"
-                      type="button"
-                      disabled={r.seats < 1}
-                      onClick={() => handleBook(r)}
-                    >
-                      {r.seats < 1 ? (
-                        'مكتمل'
-                      ) : (
-                        <>
-                          <Icon name="check" />
-                          احجز
-                        </>
                       )}
-                    </button>
+
+                      {r.phone && !isOpenExtra && (
+                        <a
+                          className="quick-call-btn"
+                          href={`tel:+213${r.phone.slice(1)}`}
+                          title="اتصال مباشر بالسائق"
+                          aria-label="اتصال مباشر بالسائق"
+                        >
+                          <Icon name="phone" />
+                        </a>
+                      )}
+
+                      <button
+                        className="more"
+                        type="button"
+                        aria-expanded={isOpenExtra}
+                        aria-label="التفاصيل"
+                        title="عرض التفاصيل والتواصل"
+                        onClick={() => handleToggleExtra(r.id)}
+                      >
+                        <Icon name="down" />
+                      </button>
+
+                      <button
+                        className="book"
+                        type="button"
+                        disabled={r.seats < 1}
+                        onClick={() => handleBook(r)}
+                      >
+                        {r.seats < 1 ? (
+                          'مكتمل'
+                        ) : (
+                          <>
+                            <Icon name="check" />
+                            <span>احجز</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
                   </div>
                 </article>
               );

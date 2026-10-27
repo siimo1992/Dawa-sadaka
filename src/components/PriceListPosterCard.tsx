@@ -1,17 +1,24 @@
 import React, { useEffect, useState } from 'react';
 import {
   Check,
+  ChevronLeft,
+  ChevronRight,
   Code2,
   Copy,
   CopyPlus,
   Download,
+  Eye,
   FileDown,
   Layers,
   Loader2,
+  Maximize2,
+  Minimize2,
   Plus,
+  Ruler,
   SlidersHorizontal,
   Sparkles,
   Trash2,
+  X,
 } from 'lucide-react';
 
 export interface PriceListItemData {
@@ -73,6 +80,141 @@ export const DEFAULT_PDF_EXPORT_SETTINGS: PdfExportSettings = {
   addressInfo: 'عين صالح — التوصيل متاح',
   includePageNumber: true,
   footerStyle: 'dark_gold',
+};
+
+export interface PdfPagePhysicalMetrics {
+  dpi: 300;
+  srcWidthPx: number;
+  srcHeightPx: number;
+  srcWidthMm: string;
+  srcHeightMm: string;
+  marginPx: number;
+  marginMm: string;
+  footerHeightPx: number;
+  footerHeightMm: string;
+  totalWidthPx: number;
+  totalHeightPx: number;
+  totalWidthMm: string;
+  totalHeightMm: string;
+  marginLeftPct: number;
+  marginTopPct: number;
+  innerWidthPct: number;
+  innerHeightPct: number;
+  footerTopPct: number;
+  footerHeightPct: number;
+}
+
+export function pxToMmAt300Dpi(px: number): string {
+  return ((px / 300) * 25.4).toFixed(1);
+}
+
+export function computePdfPageMetrics(
+  settings: PdfExportSettings,
+  srcW: number = 1200,
+  srcH: number = 1500
+): PdfPagePhysicalMetrics {
+  const marginPx = Math.max(0, Number(settings.marginSizePx || 0));
+  const footerHeightPx = settings.enableFooter ? Math.round(srcW * 0.135) : 0; // 162px at 1200px width
+  const totalWidthPx = srcW + marginPx * 2;
+  const totalHeightPx = srcH + footerHeightPx + marginPx * 2;
+
+  return {
+    dpi: 300,
+    srcWidthPx: srcW,
+    srcHeightPx: srcH,
+    srcWidthMm: pxToMmAt300Dpi(srcW),
+    srcHeightMm: pxToMmAt300Dpi(srcH),
+    marginPx,
+    marginMm: pxToMmAt300Dpi(marginPx),
+    footerHeightPx,
+    footerHeightMm: pxToMmAt300Dpi(footerHeightPx),
+    totalWidthPx,
+    totalHeightPx,
+    totalWidthMm: pxToMmAt300Dpi(totalWidthPx),
+    totalHeightMm: pxToMmAt300Dpi(totalHeightPx),
+    marginLeftPct: (marginPx / totalWidthPx) * 100,
+    marginTopPct: (marginPx / totalHeightPx) * 100,
+    innerWidthPct: (srcW / totalWidthPx) * 100,
+    innerHeightPct: (srcH / totalHeightPx) * 100,
+    footerTopPct: ((marginPx + srcH) / totalHeightPx) * 100,
+    footerHeightPct: (footerHeightPx / totalHeightPx) * 100,
+  };
+}
+
+/**
+ * طبقة إرشادية هندسية غير مطبوعة (Non-printed Trim & Margin Guides Overlay)
+ * تظهر حدود القص والهوامش باللون الكهرماني المتقطع ومنطقة التذييل التلقائي باللون الزمردي مع الأبعاد بالبكسل والملليمتر.
+ */
+const PdfTrimAndFooterGuidesOverlay: React.FC<{
+  metrics: PdfPagePhysicalMetrics;
+  compact?: boolean;
+}> = ({ metrics, compact = false }) => {
+  const hasMargin = metrics.marginPx > 0;
+  const hasFooter = metrics.footerHeightPx > 0;
+
+  return (
+    <div className="pointer-events-none absolute inset-0 overflow-hidden select-none z-10" dir="ltr">
+      {/* Outer Page Trim Border */}
+      <div className="absolute inset-0 border border-amber-400/70" />
+
+      {/* Inner Poster Design Safe Zone (Trim / Margin Boundary) */}
+      <div
+        className="absolute border-2 border-dashed border-amber-400 shadow-[0_0_0_1px_rgba(0,0,0,0.45)]"
+        style={{
+          left: `${metrics.marginLeftPct}%`,
+          top: `${metrics.marginTopPct}%`,
+          width: `${metrics.innerWidthPct}%`,
+          height: `${metrics.innerHeightPct}%`,
+        }}
+      >
+        <div
+          className={`absolute top-1.5 left-1.5 rounded bg-slate-950/90 border border-amber-400/70 text-amber-300 font-mono tabular-nums font-bold shadow-sm ${
+            compact ? 'px-1 py-0.5 text-[8.5px]' : 'px-1.5 py-0.5 text-[10px]'
+          }`}
+        >
+          {compact
+            ? `${metrics.srcWidthPx}×${metrics.srcHeightPx}px`
+            : `حدود التصميم: ${metrics.srcWidthPx}×${metrics.srcHeightPx}px (${metrics.srcWidthMm}×${metrics.srcHeightMm}mm)`}
+        </div>
+      </div>
+
+      {/* Margin Callout Badge when margin > 0 */}
+      {hasMargin && (
+        <div
+          className={`absolute top-1 right-1 rounded bg-amber-500 text-slate-950 font-mono tabular-nums font-extrabold shadow-sm ${
+            compact ? 'px-1 py-0.5 text-[8.5px]' : 'px-2 py-0.5 text-[10px]'
+          }`}
+        >
+          {compact
+            ? `هامش ${metrics.marginPx}px (${metrics.marginMm}mm)`
+            : `حد الهوامش والقص: ${metrics.marginPx}px (${metrics.marginMm}mm)`}
+        </div>
+      )}
+
+      {/* Automatic Store Footer Zone Boundary */}
+      {hasFooter && (
+        <div
+          className="absolute border-2 border-dashed border-emerald-400 bg-emerald-500/10"
+          style={{
+            left: `${metrics.marginLeftPct}%`,
+            top: `${metrics.footerTopPct}%`,
+            width: `${metrics.innerWidthPct}%`,
+            height: `${metrics.footerHeightPct}%`,
+          }}
+        >
+          <div
+            className={`absolute bottom-1 left-1.5 rounded bg-slate-950/90 border border-emerald-400/80 text-emerald-300 font-mono tabular-nums font-bold shadow-sm ${
+              compact ? 'px-1 py-0.5 text-[8px]' : 'px-1.5 py-0.5 text-[10px]'
+            }`}
+          >
+            {compact
+              ? `التذييل: ${metrics.footerHeightPx}px (${metrics.footerHeightMm}mm)`
+              : `منطقة التذييل التلقائي: ${metrics.srcWidthPx}×${metrics.footerHeightPx}px (${metrics.srcWidthMm}×${metrics.footerHeightMm}mm)`}
+          </div>
+        </div>
+      )}
+    </div>
+  );
 };
 
 /**
@@ -615,6 +757,7 @@ interface PriceListPosterCardProps {
   poster: PriceListPosterData;
   isSelectedForPdf: boolean;
   selectedCount: number;
+  selectedPosterImages?: string[];
   isActiveReference: boolean;
   isExportingPdf: boolean;
   pdfSettings?: PdfExportSettings;
@@ -639,6 +782,7 @@ export const PriceListPosterCard: React.FC<PriceListPosterCardProps> = ({
   poster,
   isSelectedForPdf,
   selectedCount,
+  selectedPosterImages,
   isActiveReference,
   isExportingPdf,
   pdfSettings,
@@ -660,6 +804,14 @@ export const PriceListPosterCard: React.FC<PriceListPosterCardProps> = ({
   const [showPdfSettingsPanel, setShowPdfSettingsPanel] = useState(false);
   const [showPillowPythonCode, setShowPillowPythonCode] = useState(false);
   const [copiedPython, setCopiedPython] = useState(false);
+  const [showMiniGuides, setShowMiniGuides] = useState(true);
+  const [showPdfPreviewModal, setShowPdfPreviewModal] = useState(false);
+  const [showModalTrimGuides, setShowModalTrimGuides] = useState(true);
+  const [modalZoomFit, setModalZoomFit] = useState<'fit' | '100'>('fit');
+  const [modalPageIndex, setModalPageIndex] = useState(0);
+  const [modalCompositedPageUrl, setModalCompositedPageUrl] = useState<string>('');
+  const [isRenderingModalPage, setIsRenderingModalPage] = useState(false);
+
   const [localPdfSettings, setLocalPdfSettings] = useState<PdfExportSettings>(
     pdfSettings || {
       ...DEFAULT_PDF_EXPORT_SETTINGS,
@@ -669,6 +821,7 @@ export const PriceListPosterCard: React.FC<PriceListPosterCardProps> = ({
   const [previewWithFooterDataUrl, setPreviewWithFooterDataUrl] = useState<string>('');
 
   const activePdfSettings = pdfSettings || localPdfSettings;
+  const pageMetrics = computePdfPageMetrics(activePdfSettings, 1200, 1500);
 
   const updateSettings = (patch: Partial<PdfExportSettings>) => {
     const next = { ...activePdfSettings, ...patch };
@@ -723,6 +876,55 @@ export const PriceListPosterCard: React.FC<PriceListPosterCardProps> = ({
   const effectiveImage = baseEffectiveImage;
   const previewDisplayImage =
     showPdfSettingsPanel && previewWithFooterDataUrl ? previewWithFooterDataUrl : effectiveImage;
+  const liveMiniPreviewImage = previewWithFooterDataUrl || effectiveImage;
+
+  // Pages list for the interactive Pre-Export PDF Preview Modal
+  const modalSourcePages =
+    selectedPosterImages && selectedPosterImages.length > 0
+      ? selectedPosterImages
+      : effectiveImage
+      ? [effectiveImage]
+      : [];
+
+  const safeModalPageIndex =
+    modalSourcePages.length > 0
+      ? Math.min(modalPageIndex, modalSourcePages.length - 1)
+      : 0;
+
+  useEffect(() => {
+    if (!showPdfPreviewModal) return;
+    const srcImg = modalSourcePages[safeModalPageIndex] || effectiveImage;
+    if (!srcImg) return;
+    let mounted = true;
+    setIsRenderingModalPage(true);
+    applyPillowMarginsAndFooterToPage(
+      srcImg,
+      activePdfSettings,
+      safeModalPageIndex,
+      Math.max(modalSourcePages.length, 1)
+    )
+      .then((resUrl) => {
+        if (mounted) {
+          setModalCompositedPageUrl(resUrl || srcImg);
+          setIsRenderingModalPage(false);
+        }
+      })
+      .catch(() => {
+        if (mounted) {
+          setModalCompositedPageUrl(srcImg);
+          setIsRenderingModalPage(false);
+        }
+      });
+    return () => {
+      mounted = false;
+    };
+  }, [
+    showPdfPreviewModal,
+    safeModalPageIndex,
+    modalSourcePages.length,
+    effectiveImage,
+    activePdfSettings,
+  ]);
 
   const handleDownloadSingleJpg = () => {
     const targetImg = previewWithFooterDataUrl || effectiveImage;
@@ -774,6 +976,18 @@ export const PriceListPosterCard: React.FC<PriceListPosterCardProps> = ({
               {displayMode === 'ai' ? 'عرض طباعة عربية فائقة الوضوح' : 'عرض صورة النموذج التوليدي'}
             </button>
           )}
+
+          <button
+            type="button"
+            onClick={() => {
+              setModalPageIndex(0);
+              setShowPdfPreviewModal(true);
+            }}
+            className="px-2.5 py-1 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/40 text-[11px] font-bold text-amber-700 dark:text-amber-300 flex items-center gap-1 cursor-pointer transition-colors whitespace-nowrap"
+          >
+            <Eye className="w-3.5 h-3.5 text-amber-500" />
+            <span>معاينة صفحة PDF</span>
+          </button>
 
           <button
             type="button"
@@ -852,7 +1066,7 @@ export const PriceListPosterCard: React.FC<PriceListPosterCardProps> = ({
             </div>
           </div>
 
-          {/* Primary Action Buttons: Select for PDF, Set Reference Variation, Export PDF */}
+          {/* Primary Action Buttons: Select for PDF, Set Reference Variation, Settings, Preview & Export PDF */}
           <div className="flex flex-wrap items-center gap-2 pt-1">
             <button
               type="button"
@@ -895,10 +1109,23 @@ export const PriceListPosterCard: React.FC<PriceListPosterCardProps> = ({
                   ? 'bg-amber-500/20 border-amber-500 text-amber-700 dark:text-amber-300'
                   : 'bg-[var(--card)] hover:bg-[var(--line)]/40 border-[var(--line)] text-[var(--ink)]'
               }`}
-              title="تخصيص الهوامش (Margins) والتذييل التلقائي (Footer) في دالة تصدير PDF"
+              title="تخصيص الهوامش (Margins) والتذييل التلقائي (Footer) مع معاينة حية"
             >
               <SlidersHorizontal className="w-3.5 h-3.5 text-amber-500" />
-              <span>إعدادات PDF (الهوامش والتذييل)</span>
+              <span>إعدادات ومعاينة PDF</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                setModalPageIndex(0);
+                setShowPdfPreviewModal(true);
+              }}
+              className="px-3 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-slate-950 text-xs font-extrabold flex items-center gap-1.5 cursor-pointer shadow-xs transition-all whitespace-nowrap"
+              title="فتح نافذة معاينة صفحة الـ PDF التفاعلية مع حدود الهوامش والقص والأبعاد بالبكسل والملليمتر قبل التصدير"
+            >
+              <Eye className="w-3.5 h-3.5" />
+              <span>معاينة PDF قبل التصدير</span>
             </button>
 
             <button
@@ -920,208 +1147,356 @@ export const PriceListPosterCard: React.FC<PriceListPosterCardProps> = ({
               )}
               <span>
                 {selectedCount > 0
-                  ? `تحويل الصور المختارة (${selectedCount}) إلى PDF للطباعة`
-                  : 'تصدير هذه القائمة إلى PDF للطباعة (300 DPI)'}
+                  ? `تصدير الصور المختارة (${selectedCount}) إلى PDF`
+                  : 'تصدير مباشر إلى PDF (300 DPI)'}
               </span>
             </button>
           </div>
 
-          {/* Active Pillow PDF Summary Pill */}
-          <div className="flex items-center justify-between gap-2 px-3 py-1.5 rounded-xl bg-[var(--card)] border border-[var(--line)]/80 text-[11px]">
+          {/* Active Pillow PDF Summary Bar with Live Physical Dimensions */}
+          <div className="flex items-center justify-between gap-2 px-3 py-1.5 rounded-xl bg-[var(--card)] border border-[var(--line)]/80 text-[11px] flex-wrap">
             <div className="flex items-center gap-2 flex-wrap text-[var(--mute)]">
-              <span className="font-bold text-[var(--ink)]">إعدادات Pillow PDF النشطة:</span>
+              <span className="font-bold text-[var(--ink)]">أبعاد صفحة PDF:</span>
+              <span
+                dir="ltr"
+                className="px-2 py-0.5 rounded-md bg-[var(--bg)] border border-[var(--line)] font-mono tabular-nums text-[var(--ink)] font-bold"
+              >
+                {pageMetrics.totalWidthPx}×{pageMetrics.totalHeightPx}px ({pageMetrics.totalWidthMm}×{pageMetrics.totalHeightMm}mm)
+              </span>
               <span className="px-2 py-0.5 rounded-md bg-[var(--bg)] border border-[var(--line)] font-mono tabular-nums text-[var(--ink)]">
-                الهوامش: {activePdfSettings.marginSizePx === 0 ? 'بدون هوامش (0px)' : `${activePdfSettings.marginSizePx}px`}
+                الهوامش: {pageMetrics.marginPx}px ({pageMetrics.marginMm}mm)
               </span>
               <span className="px-2 py-0.5 rounded-md bg-[var(--bg)] border border-[var(--line)] text-[var(--ink)]">
                 {activePdfSettings.enableFooter
-                  ? `التذييل: ${activePdfSettings.storeName || 'مفعّل'}`
+                  ? `التذييل: ${pageMetrics.footerHeightPx}px (${pageMetrics.footerHeightMm}mm)`
                   : 'التذييل: غير مفعّل'}
               </span>
             </div>
-            <button
-              type="button"
-              onClick={() => setShowPdfSettingsPanel((prev) => !prev)}
-              className="text-[11px] font-bold text-amber-600 dark:text-amber-400 hover:underline cursor-pointer shrink-0"
-            >
-              {showPdfSettingsPanel ? 'إخفاء الإعدادات ▲' : 'تخصيص ⚙'}
-            </button>
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={() => {
+                  setModalPageIndex(0);
+                  setShowPdfPreviewModal(true);
+                }}
+                className="text-[11px] font-bold text-emerald-600 dark:text-emerald-400 hover:underline cursor-pointer"
+              >
+                معاينة تفاعلية 👁
+              </button>
+              <span className="text-[var(--line)]">·</span>
+              <button
+                type="button"
+                onClick={() => setShowPdfSettingsPanel((prev) => !prev)}
+                className="text-[11px] font-bold text-amber-600 dark:text-amber-400 hover:underline cursor-pointer"
+              >
+                {showPdfSettingsPanel ? 'إخفاء الإعدادات ▲' : 'تخصيص ⚙'}
+              </button>
+            </div>
           </div>
 
-          {/* Custom Pillow PDF Margins & Automatic Store Footer Settings Panel */}
+          {/* Custom Pillow PDF Margins & Automatic Store Footer Settings Panel + Live Mini-Preview */}
           {showPdfSettingsPanel && (
-            <div className="p-3.5 rounded-xl bg-[var(--card)] border border-amber-500/40 space-y-3 animate-in fade-in">
-              <div className="flex items-center justify-between gap-2 border-b border-[var(--line)]/60 pb-2">
+            <div className="p-3.5 rounded-xl bg-[var(--card)] border border-amber-500/40 space-y-3.5 animate-in fade-in">
+              <div className="flex items-center justify-between gap-2 border-b border-[var(--line)]/60 pb-2 flex-wrap">
                 <div className="flex items-center gap-1.5 text-xs font-extrabold text-[var(--ink)]">
                   <SlidersHorizontal className="w-4 h-4 text-amber-500" />
-                  <span>إعدادات Pillow المخصصة لدالة تصدير PDF (الهوامش + التذييل التلقائي)</span>
+                  <span>إعدادات Pillow المخصصة لدالة تصدير PDF مع معاينة مصغرة حية</span>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => setShowPillowPythonCode((prev) => !prev)}
-                  className="px-2.5 py-1 rounded-lg bg-[var(--bg)] hover:bg-[var(--line)]/50 border border-[var(--line)] text-[11px] font-bold text-amber-600 dark:text-amber-400 flex items-center gap-1 cursor-pointer"
-                >
-                  <Code2 className="w-3.5 h-3.5" />
-                  <span>{showPillowPythonCode ? 'إخفاء كود Pillow' : 'عرض كود Python (Pillow)'}</span>
-                </button>
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setModalPageIndex(0);
+                      setShowPdfPreviewModal(true);
+                    }}
+                    className="px-2.5 py-1 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/40 text-[11px] font-bold text-amber-700 dark:text-amber-300 flex items-center gap-1 cursor-pointer"
+                  >
+                    <Maximize2 className="w-3.5 h-3.5 text-amber-500" />
+                    <span>نافذة المعاينة الكاملة</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowPillowPythonCode((prev) => !prev)}
+                    className="px-2.5 py-1 rounded-lg bg-[var(--bg)] hover:bg-[var(--line)]/50 border border-[var(--line)] text-[11px] font-bold text-amber-600 dark:text-amber-400 flex items-center gap-1 cursor-pointer"
+                  >
+                    <Code2 className="w-3.5 h-3.5" />
+                    <span>{showPillowPythonCode ? 'إخفاء كود Pillow' : 'كود Python (Pillow)'}</span>
+                  </button>
+                </div>
               </div>
 
-              {/* 1. Margins Selection (ImageOps.expand) */}
-              <div className="space-y-1.5">
-                <label className="text-[11px] font-bold text-[var(--ink)] block">
-                  1. حجم الهوامش حول كل صفحة (Margins — <code className="font-mono">ImageOps.expand</code>):
-                </label>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
-                  {[
-                    { label: 'بدون هوامش (0px)', value: 0 },
-                    { label: 'هامش رفيع (40px)', value: 40 },
-                    { label: 'هامش قياسي (80px)', value: 80 },
-                    { label: 'هامش عريض (120px)', value: 120 },
-                  ].map((opt) => (
-                    <button
-                      key={opt.value}
-                      type="button"
-                      onClick={() => updateSettings({ marginSizePx: opt.value })}
-                      className={`px-2.5 py-1.5 rounded-lg text-[11px] font-bold border cursor-pointer transition-all ${
-                        activePdfSettings.marginSizePx === opt.value
-                          ? 'bg-amber-500 text-slate-950 border-amber-500 shadow-2xs'
-                          : 'bg-[var(--bg)] text-[var(--ink)] border-[var(--line)] hover:border-amber-500/50'
-                      }`}
-                    >
-                      {opt.label}
-                    </button>
-                  ))}
-                </div>
+              {/* Split Layout inside Settings: Controls + Live Proofing Mini-Preview */}
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-3.5 items-start">
+                {/* Controls Column (7 cols on lg) */}
+                <div className="lg:col-span-7 space-y-3">
+                  {/* 1. Margins Selection (ImageOps.expand) */}
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between gap-2">
+                      <label className="text-[11px] font-bold text-[var(--ink)]">
+                        1. حجم الهوامش حول الصفحة (Margins — <code className="font-mono">ImageOps.expand</code>):
+                      </label>
+                      <span dir="ltr" className="font-mono text-[10.5px] font-bold text-amber-500 tabular-nums">
+                        {pageMetrics.marginPx}px = {pageMetrics.marginMm} mm
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
+                      {[
+                        { label: 'بدون (0px)', value: 0 },
+                        { label: 'رفيع (40px)', value: 40 },
+                        { label: 'قياسي (80px)', value: 80 },
+                        { label: 'عريض (120px)', value: 120 },
+                      ].map((opt) => (
+                        <button
+                          key={opt.value}
+                          type="button"
+                          onClick={() => updateSettings({ marginSizePx: opt.value })}
+                          className={`px-2 py-1.5 rounded-lg text-[11px] font-bold border cursor-pointer transition-all ${
+                            activePdfSettings.marginSizePx === opt.value
+                              ? 'bg-amber-500 text-slate-950 border-amber-500 shadow-2xs'
+                              : 'bg-[var(--bg)] text-[var(--ink)] border-[var(--line)] hover:border-amber-500/50'
+                          }`}
+                        >
+                          {opt.label}
+                        </button>
+                      ))}
+                    </div>
 
-                {/* Margin Fill Color */}
-                {activePdfSettings.marginSizePx > 0 && (
-                  <div className="flex items-center gap-2 pt-1 flex-wrap">
-                    <span className="text-[11px] text-[var(--mute)] font-semibold">لون الهامش:</span>
-                    {[
-                      { label: 'أبيض للطباعة', hex: '#FFFFFF' },
-                      { label: 'كريمي فاخر', hex: '#F5EFE6' },
-                      { label: 'داكن ملكي', hex: '#18100C' },
-                      { label: 'أخضر واحة', hex: '#0E1F19' },
-                    ].map((c) => (
-                      <button
-                        key={c.hex}
-                        type="button"
-                        onClick={() => updateSettings({ marginColorHex: c.hex })}
-                        className={`px-2 py-0.5 rounded-md text-[10.5px] font-bold border flex items-center gap-1.5 cursor-pointer ${
-                          activePdfSettings.marginColorHex === c.hex
-                            ? 'border-amber-500 bg-amber-500/15 text-[var(--ink)]'
-                            : 'border-[var(--line)] bg-[var(--bg)] text-[var(--mute)]'
-                        }`}
+                    {/* Fine-grained Margin Slider */}
+                    <div className="flex items-center gap-2 pt-1">
+                      <span className="text-[10.5px] text-[var(--mute)] font-semibold shrink-0">
+                        ضبط دقيق للهامش:
+                      </span>
+                      <input
+                        type="range"
+                        min={0}
+                        max={200}
+                        step={10}
+                        value={activePdfSettings.marginSizePx}
+                        onChange={(e) => updateSettings({ marginSizePx: Number(e.target.value) })}
+                        className="flex-1 accent-amber-500 cursor-pointer"
+                      />
+                      <span
+                        dir="ltr"
+                        className="font-mono tabular-nums text-[10.5px] font-bold text-[var(--ink)] w-24 text-left"
                       >
-                        <span
-                          className="w-3 h-3 rounded-full border border-black/20 inline-block"
-                          style={{ backgroundColor: c.hex }}
-                        />
-                        <span>{c.label}</span>
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              {/* 2. Automatic Store & Contact Footer on Every Page (ImageDraw.Draw) */}
-              <div className="space-y-2 pt-2 border-t border-[var(--line)]/50">
-                <div className="flex items-center justify-between gap-2">
-                  <label className="flex items-center gap-2 text-[11px] font-bold text-[var(--ink)] cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={activePdfSettings.enableFooter}
-                      onChange={(e) => updateSettings({ enableFooter: e.target.checked })}
-                      className="rounded border-[var(--line)] text-amber-500 focus:ring-amber-500"
-                    />
-                    <span>
-                      2. إضافة تذييل تلقائي (Footer) في كل صفحة يحتوي على اسم المتجر ومعلومات التواصل
-                    </span>
-                  </label>
-
-                  {activePdfSettings.enableFooter && (
-                    <label className="flex items-center gap-1.5 text-[10.5px] font-semibold text-[var(--mute)] cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={activePdfSettings.includePageNumber}
-                        onChange={(e) => updateSettings({ includePageNumber: e.target.checked })}
-                        className="rounded border-[var(--line)] text-amber-500"
-                      />
-                      <span>ترقيم الصفحات تلقائياً</span>
-                    </label>
-                  )}
-                </div>
-
-                {activePdfSettings.enableFooter && (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
-                    <div>
-                      <span className="text-[10px] font-bold text-[var(--mute)] block mb-0.5">
-                        اسم المتجر في التذييل:
+                        {pageMetrics.marginPx}px ({pageMetrics.marginMm}mm)
                       </span>
-                      <input
-                        type="text"
-                        value={activePdfSettings.storeName}
-                        onChange={(e) => updateSettings({ storeName: e.target.value })}
-                        placeholder="مثال: ملحمة الواحة للّحوم الطازجة"
-                        className="w-full px-2.5 py-1.5 rounded-lg bg-[var(--bg)] border border-[var(--line)] text-xs text-[var(--ink)] focus:outline-none focus:border-amber-500"
-                      />
                     </div>
 
-                    <div>
-                      <span className="text-[10px] font-bold text-[var(--mute)] block mb-0.5">
-                        معلومات التواصل (هاتف / واتساب):
-                      </span>
-                      <input
-                        type="text"
-                        value={activePdfSettings.contactInfo}
-                        onChange={(e) => updateSettings({ contactInfo: e.target.value })}
-                        placeholder="مثال: هاتف / واتساب: 0660 00 00 00"
-                        className="w-full px-2.5 py-1.5 rounded-lg bg-[var(--bg)] border border-[var(--line)] text-xs text-[var(--ink)] focus:outline-none focus:border-amber-500"
-                      />
-                    </div>
-
-                    <div className="sm:col-span-2 flex flex-col sm:flex-row gap-2">
-                      <div className="flex-1">
-                        <span className="text-[10px] font-bold text-[var(--mute)] block mb-0.5">
-                          العنوان أو ملاحظة إضافية (اختياري):
-                        </span>
-                        <input
-                          type="text"
-                          value={activePdfSettings.addressInfo}
-                          onChange={(e) => updateSettings({ addressInfo: e.target.value })}
-                          placeholder="مثال: عين صالح — وسط المدينة (التوصيل متاح)"
-                          className="w-full px-2.5 py-1.5 rounded-lg bg-[var(--bg)] border border-[var(--line)] text-xs text-[var(--ink)] focus:outline-none focus:border-amber-500"
-                        />
+                    {/* Margin Fill Color */}
+                    {activePdfSettings.marginSizePx > 0 && (
+                      <div className="flex items-center gap-1.5 pt-1 flex-wrap">
+                        <span className="text-[10.5px] text-[var(--mute)] font-semibold">لون الهامش:</span>
+                        {[
+                          { label: 'أبيض للطباعة', hex: '#FFFFFF' },
+                          { label: 'كريمي فاخر', hex: '#F5EFE6' },
+                          { label: 'داكن ملكي', hex: '#18100C' },
+                          { label: 'أخضر واحة', hex: '#0E1F19' },
+                        ].map((c) => (
+                          <button
+                            key={c.hex}
+                            type="button"
+                            onClick={() => updateSettings({ marginColorHex: c.hex })}
+                            className={`px-2 py-0.5 rounded-md text-[10px] font-bold border flex items-center gap-1 cursor-pointer ${
+                              activePdfSettings.marginColorHex === c.hex
+                                ? 'border-amber-500 bg-amber-500/15 text-[var(--ink)]'
+                                : 'border-[var(--line)] bg-[var(--bg)] text-[var(--mute)]'
+                            }`}
+                          >
+                            <span
+                              className="w-2.5 h-2.5 rounded-full border border-black/20 inline-block"
+                              style={{ backgroundColor: c.hex }}
+                            />
+                            <span>{c.label}</span>
+                          </button>
+                        ))}
                       </div>
+                    )}
+                  </div>
 
-                      <div>
-                        <span className="text-[10px] font-bold text-[var(--mute)] block mb-0.5">
-                          نمط التذييل:
-                        </span>
-                        <div className="flex items-center gap-1">
-                          {[
-                            { id: 'dark_gold' as const, label: 'ذهبي داكن' },
-                            { id: 'light_clean' as const, label: 'فاتح للطباعة' },
-                            { id: 'emerald_oasis' as const, label: 'أخضر واحة' },
-                          ].map((st) => (
-                            <button
-                              key={st.id}
-                              type="button"
-                              onClick={() => updateSettings({ footerStyle: st.id })}
-                              className={`px-2 py-1.5 rounded-lg text-[10.5px] font-bold border cursor-pointer ${
-                                activePdfSettings.footerStyle === st.id
-                                  ? 'bg-amber-500/20 border-amber-500 text-amber-600 dark:text-amber-300'
-                                  : 'bg-[var(--bg)] border-[var(--line)] text-[var(--mute)]'
-                              }`}
-                            >
-                              {st.label}
-                            </button>
-                          ))}
+                  {/* 2. Automatic Store & Contact Footer on Every Page (ImageDraw.Draw) */}
+                  <div className="space-y-2 pt-2 border-t border-[var(--line)]/50">
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                      <label className="flex items-center gap-2 text-[11px] font-bold text-[var(--ink)] cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={activePdfSettings.enableFooter}
+                          onChange={(e) => updateSettings({ enableFooter: e.target.checked })}
+                          className="rounded border-[var(--line)] text-amber-500 focus:ring-amber-500"
+                        />
+                        <span>2. إضافة تذييل تلقائي (Footer) باسم المتجر ومعلومات التواصل</span>
+                      </label>
+
+                      {activePdfSettings.enableFooter && (
+                        <label className="flex items-center gap-1.5 text-[10.5px] font-semibold text-[var(--mute)] cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={activePdfSettings.includePageNumber}
+                            onChange={(e) => updateSettings({ includePageNumber: e.target.checked })}
+                            className="rounded border-[var(--line)] text-amber-500"
+                          />
+                          <span>ترقيم الصفحات</span>
+                        </label>
+                      )}
+                    </div>
+
+                    {activePdfSettings.enableFooter && (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+                        <div>
+                          <span className="text-[10px] font-bold text-[var(--mute)] block mb-0.5">
+                            اسم المتجر في التذييل:
+                          </span>
+                          <input
+                            type="text"
+                            value={activePdfSettings.storeName}
+                            onChange={(e) => updateSettings({ storeName: e.target.value })}
+                            placeholder="مثال: ملحمة الواحة للّحوم الطازجة"
+                            className="w-full px-2.5 py-1.5 rounded-lg bg-[var(--bg)] border border-[var(--line)] text-xs text-[var(--ink)] focus:outline-none focus:border-amber-500"
+                          />
+                        </div>
+
+                        <div>
+                          <span className="text-[10px] font-bold text-[var(--mute)] block mb-0.5">
+                            معلومات التواصل (هاتف / واتساب):
+                          </span>
+                          <input
+                            type="text"
+                            value={activePdfSettings.contactInfo}
+                            onChange={(e) => updateSettings({ contactInfo: e.target.value })}
+                            placeholder="مثال: هاتف / واتساب: 0660 00 00 00"
+                            className="w-full px-2.5 py-1.5 rounded-lg bg-[var(--bg)] border border-[var(--line)] text-xs text-[var(--ink)] focus:outline-none focus:border-amber-500"
+                          />
+                        </div>
+
+                        <div className="sm:col-span-2 flex flex-col sm:flex-row gap-2">
+                          <div className="flex-1">
+                            <span className="text-[10px] font-bold text-[var(--mute)] block mb-0.5">
+                              العنوان أو ملاحظة إضافية (اختياري):
+                            </span>
+                            <input
+                              type="text"
+                              value={activePdfSettings.addressInfo}
+                              onChange={(e) => updateSettings({ addressInfo: e.target.value })}
+                              placeholder="مثال: عين صالح — وسط المدينة (التوصيل متاح)"
+                              className="w-full px-2.5 py-1.5 rounded-lg bg-[var(--bg)] border border-[var(--line)] text-xs text-[var(--ink)] focus:outline-none focus:border-amber-500"
+                            />
+                          </div>
+
+                          <div>
+                            <span className="text-[10px] font-bold text-[var(--mute)] block mb-0.5">
+                              نمط التذييل:
+                            </span>
+                            <div className="flex items-center gap-1">
+                              {[
+                                { id: 'dark_gold' as const, label: 'ذهبي داكن' },
+                                { id: 'light_clean' as const, label: 'فاتح للطباعة' },
+                                { id: 'emerald_oasis' as const, label: 'أخضر واحة' },
+                              ].map((st) => (
+                                <button
+                                  key={st.id}
+                                  type="button"
+                                  onClick={() => updateSettings({ footerStyle: st.id })}
+                                  className={`px-2 py-1.5 rounded-lg text-[10.5px] font-bold border cursor-pointer ${
+                                    activePdfSettings.footerStyle === st.id
+                                      ? 'bg-amber-500/20 border-amber-500 text-amber-600 dark:text-amber-300'
+                                      : 'bg-[var(--bg)] border-[var(--line)] text-[var(--mute)]'
+                                  }`}
+                                >
+                                  {st.label}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
                         </div>
                       </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Live Mini-Preview Column inside Settings (5 cols on lg) */}
+                <div className="lg:col-span-5 rounded-xl border border-slate-800 bg-[#0E1318] p-2.5 text-slate-100 space-y-2 shadow-inner">
+                  <div className="flex items-center justify-between gap-1.5 border-b border-slate-800 pb-1.5">
+                    <span className="text-[10.5px] font-extrabold text-amber-400 flex items-center gap-1">
+                      <Ruler className="w-3.5 h-3.5" />
+                      <span>معاينة مصغرة حية لصفحة الـ PDF</span>
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setShowMiniGuides((prev) => !prev)}
+                      className={`px-2 py-0.5 rounded text-[10px] font-bold border cursor-pointer transition-colors ${
+                        showMiniGuides
+                          ? 'bg-amber-500/20 border-amber-400 text-amber-300'
+                          : 'bg-slate-900 border-slate-700 text-slate-400'
+                      }`}
+                    >
+                      {showMiniGuides ? 'إخفاء خطوط القص' : 'إظهار خطوط القص'}
+                    </button>
+                  </div>
+
+                  {/* Mini Proofing Stage */}
+                  <div className="relative flex items-center justify-center py-2 px-3 bg-[#090D11] rounded-lg border border-slate-800/80 min-h-[210px]">
+                    {liveMiniPreviewImage ? (
+                      <div
+                        onClick={() => {
+                          setModalPageIndex(0);
+                          setShowPdfPreviewModal(true);
+                        }}
+                        className="relative inline-block max-w-[165px] w-full shadow-2xl cursor-pointer group"
+                        title="اضغط لفتح نافذة معاينة الـ PDF التفاعلية بالحجم الكامل"
+                      >
+                        <img
+                          src={liveMiniPreviewImage}
+                          alt="معاينة صفحة PDF"
+                          className="w-full h-auto block rounded-xs"
+                        />
+                        {showMiniGuides && (
+                          <PdfTrimAndFooterGuidesOverlay metrics={pageMetrics} compact={true} />
+                        )}
+                      </div>
+                    ) : (
+                      <div className="text-[11px] text-slate-400 flex items-center gap-1.5">
+                        <Loader2 className="w-4 h-4 animate-spin text-amber-400" />
+                        <span>جاري تحديث المعاينة...</span>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Mini Technical Readout (px & mm at 300 DPI) */}
+                  <div className="space-y-1 text-[10px] bg-slate-950/90 p-2 rounded-lg border border-slate-800/90 font-mono tabular-nums">
+                    <div className="flex items-center justify-between text-slate-300">
+                      <span className="font-sans font-semibold text-slate-400">حجم الصفحة النهائي:</span>
+                      <span dir="ltr" className="text-amber-300 font-bold">
+                        {pageMetrics.totalWidthPx}×{pageMetrics.totalHeightPx}px ({pageMetrics.totalWidthMm}×{pageMetrics.totalHeightMm}mm)
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between text-slate-300">
+                      <span className="font-sans font-semibold text-slate-400">الهوامش (Margins):</span>
+                      <span dir="ltr" className="text-slate-200">
+                        {pageMetrics.marginPx}px ({pageMetrics.marginMm}mm)
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between text-slate-300">
+                      <span className="font-sans font-semibold text-slate-400">التذييل (Footer):</span>
+                      <span dir="ltr" className="text-emerald-300">
+                        {pageMetrics.footerHeightPx > 0
+                          ? `${pageMetrics.footerHeightPx}px (${pageMetrics.footerHeightMm}mm)`
+                          : '0px (0.0mm)'}
+                      </span>
                     </div>
                   </div>
-                )}
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setModalPageIndex(0);
+                      setShowPdfPreviewModal(true);
+                    }}
+                    className="w-full py-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/50 text-amber-300 text-[11px] font-extrabold flex items-center justify-center gap-1.5 cursor-pointer transition-colors"
+                  >
+                    <Eye className="w-3.5 h-3.5" />
+                    <span>فحص هندسي كامل ومعاينة قبل التصدير</span>
+                  </button>
+                </div>
               </div>
 
               {/* 3. Live Pillow Python Code Snippet Viewer */}
@@ -1318,6 +1693,404 @@ export const PriceListPosterCard: React.FC<PriceListPosterCardProps> = ({
           )}
         </div>
       </div>
+
+      {/* Interactive Pre-Export PDF Preview Modal (نافذة معاينة صفحة PDF التفاعلية قبل التصدير) */}
+      {showPdfPreviewModal && (
+        <div
+          className="fixed inset-0 z-50 bg-black/80 backdrop-blur-xs flex items-center justify-center p-2 sm:p-4 animate-in fade-in"
+          onClick={() => setShowPdfPreviewModal(false)}
+        >
+          <div
+            className="w-full max-w-5xl max-h-[92vh] rounded-2xl border border-slate-700/80 bg-[#0E1318] text-slate-100 shadow-2xl flex flex-col overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+            dir="rtl"
+          >
+            {/* Modal Top Studio Header Bar */}
+            <div className="px-4 py-3 bg-[#141B22] border-b border-slate-800 flex items-center justify-between gap-3 flex-wrap">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-xl bg-amber-500/15 border border-amber-500/40 flex items-center justify-center text-amber-400">
+                  <Ruler className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-xs sm:text-sm font-black text-white m-0">
+                    معاينة صفحة PDF التفاعلية قبل التصدير (300 DPI Print Proof)
+                  </h3>
+                  <p className="text-[11px] text-slate-400 m-0">
+                    تحقق من الهوامش، التذييل التلقائي، وحدود القص والأبعاد الحقيقية بالبكسل والملليمتر قبل التصدير النهائي
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 flex-wrap">
+                {/* Multi-Page Switcher when exporting multiple selected posters */}
+                {modalSourcePages.length > 1 && (
+                  <div className="flex items-center gap-1 bg-slate-900 border border-slate-700 rounded-xl px-2 py-1 text-xs">
+                    <button
+                      type="button"
+                      disabled={safeModalPageIndex === 0}
+                      onClick={() => setModalPageIndex((i) => Math.max(0, i - 1))}
+                      className="p-0.5 text-slate-300 hover:text-amber-400 disabled:opacity-30 cursor-pointer"
+                      title="الصفحة السابقة"
+                    >
+                      <ChevronRight className="w-4 h-4" />
+                    </button>
+                    <span className="font-mono tabular-nums text-[11px] font-bold px-1.5 text-amber-300">
+                      صفحة {safeModalPageIndex + 1} من {modalSourcePages.length}
+                    </span>
+                    <button
+                      type="button"
+                      disabled={safeModalPageIndex >= modalSourcePages.length - 1}
+                      onClick={() =>
+                        setModalPageIndex((i) => Math.min(modalSourcePages.length - 1, i + 1))
+                      }
+                      className="p-0.5 text-slate-300 hover:text-amber-400 disabled:opacity-30 cursor-pointer"
+                      title="الصفحة التالية"
+                    >
+                      <ChevronLeft className="w-4 h-4" />
+                    </button>
+                  </div>
+                )}
+
+                {/* Toggle Trim & Margin Guides */}
+                <button
+                  type="button"
+                  onClick={() => setShowModalTrimGuides((prev) => !prev)}
+                  className={`px-2.5 py-1.5 rounded-xl text-xs font-bold border flex items-center gap-1.5 cursor-pointer transition-all ${
+                    showModalTrimGuides
+                      ? 'bg-amber-500/20 border-amber-400 text-amber-300'
+                      : 'bg-slate-900 border-slate-700 text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  <Ruler className="w-3.5 h-3.5" />
+                  <span>{showModalTrimGuides ? 'إخفاء حدود الهوامش والقص' : 'إظهار حدود الهوامش والقص'}</span>
+                </button>
+
+                {/* Zoom / Fit Toggle */}
+                <button
+                  type="button"
+                  onClick={() => setModalZoomFit((z) => (z === 'fit' ? '100' : 'fit'))}
+                  className="px-2.5 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-700 text-xs font-bold text-slate-200 flex items-center gap-1.5 cursor-pointer"
+                >
+                  {modalZoomFit === 'fit' ? (
+                    <>
+                      <Maximize2 className="w-3.5 h-3.5 text-emerald-400" />
+                      <span>تكبير 100%</span>
+                    </>
+                  ) : (
+                    <>
+                      <Minimize2 className="w-3.5 h-3.5 text-amber-400" />
+                      <span>ملائمة الشاشة</span>
+                    </>
+                  )}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setShowPdfPreviewModal(false)}
+                  className="p-1.5 rounded-xl bg-slate-900 hover:bg-rose-500/20 border border-slate-700 text-slate-400 hover:text-rose-300 cursor-pointer"
+                  title="إغلاق المعاينة"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+
+            {/* Modal Main Split Workspace: Proofing Canvas + Engineering Specs & Quick Controls */}
+            <div className="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-12 overflow-y-auto">
+              {/* Left/Center Proofing Canvas Stage (7 cols) */}
+              <div className="lg:col-span-7 bg-[#090D11] p-4 sm:p-6 flex flex-col items-center justify-center overflow-auto border-b lg:border-b-0 lg:border-l border-slate-800">
+                {/* Top Horizontal Dimension Ruler Bar */}
+                <div
+                  dir="ltr"
+                  className="mb-2 px-3 py-1 rounded-full bg-slate-900/90 border border-slate-700/80 text-[11px] font-mono tabular-nums text-amber-300 flex items-center gap-2 shadow-xs"
+                >
+                  <span>العرض الكلي (Width):</span>
+                  <strong className="text-white">{pageMetrics.totalWidthPx} px</strong>
+                  <span className="text-slate-500">|</span>
+                  <strong className="text-emerald-300">{pageMetrics.totalWidthMm} mm</strong>
+                  <span className="text-slate-500">@ 300 DPI</span>
+                </div>
+
+                {/* Page Canvas Container */}
+                <div className="relative flex items-center justify-center my-auto">
+                  {isRenderingModalPage && (
+                    <div className="absolute inset-0 z-20 bg-black/50 backdrop-blur-[1px] flex items-center justify-center rounded-lg">
+                      <div className="px-3 py-1.5 rounded-xl bg-slate-900 border border-amber-500/40 text-xs text-amber-300 flex items-center gap-2">
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        <span>جاري تحديث معاينة الصفحة...</span>
+                      </div>
+                    </div>
+                  )}
+
+                  <div
+                    className={`relative shadow-[0_20px_60px_rgba(0,0,0,0.85)] transition-all duration-200 ${
+                      modalZoomFit === 'fit'
+                        ? 'max-h-[54vh] max-w-[360px] sm:max-w-[400px] w-full'
+                        : 'w-[540px] max-w-none'
+                    }`}
+                  >
+                    <img
+                      src={modalCompositedPageUrl || liveMiniPreviewImage}
+                      alt="PDF Page Proof"
+                      className="w-full h-auto block rounded-xs"
+                    />
+                    {showModalTrimGuides && (
+                      <PdfTrimAndFooterGuidesOverlay metrics={pageMetrics} compact={false} />
+                    )}
+                  </div>
+                </div>
+
+                {/* Bottom Height & Legend Bar */}
+                <div className="mt-3 flex items-center justify-center gap-3 flex-wrap text-[11px]">
+                  <span
+                    dir="ltr"
+                    className="px-2.5 py-1 rounded-lg bg-slate-900 border border-slate-800 font-mono tabular-nums text-slate-300"
+                  >
+                    الارتفاع الكلي (Height): <strong className="text-white">{pageMetrics.totalHeightPx} px</strong> ({pageMetrics.totalHeightMm} mm)
+                  </span>
+                  {showModalTrimGuides && (
+                    <>
+                      <span className="inline-flex items-center gap-1.5 text-amber-300 text-[10.5px]">
+                        <span className="w-3 h-0.5 border-b-2 border-dashed border-amber-400 inline-block" />
+                        <span>حدود الهوامش والقص (Trim Box)</span>
+                      </span>
+                      {pageMetrics.footerHeightPx > 0 && (
+                        <span className="inline-flex items-center gap-1.5 text-emerald-300 text-[10.5px]">
+                          <span className="w-3 h-0.5 border-b-2 border-dashed border-emerald-400 inline-block" />
+                          <span>منطقة التذييل التلقائي (Footer Zone)</span>
+                        </span>
+                      )}
+                    </>
+                  )}
+                </div>
+              </div>
+
+              {/* Right Sidebar: Real Physical Dimensions Table + Live Adjustments (5 cols) */}
+              <div className="lg:col-span-5 p-4 bg-[#11171F] space-y-4 overflow-y-auto">
+                {/* 1. Engineering Dimensions Table (px & mm at 300 DPI) */}
+                <div className="rounded-xl border border-slate-800 bg-slate-950/80 p-3 space-y-2">
+                  <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                    <span className="text-xs font-extrabold text-amber-400 flex items-center gap-1.5">
+                      <Ruler className="w-3.5 h-3.5" />
+                      <span>الأبعاد الحقيقية للطباعة (300 DPI)</span>
+                    </span>
+                    <span className="px-2 py-0.5 rounded bg-emerald-500/15 border border-emerald-500/30 font-mono text-[10px] text-emerald-300 font-bold">
+                      RGB · 300 DPI
+                    </span>
+                  </div>
+
+                  <div className="space-y-1.5 text-[11px]">
+                    <div className="flex items-center justify-between py-1 border-b border-slate-800/60">
+                      <span className="text-slate-400">أبعاد الملصق الداخلي:</span>
+                      <span dir="ltr" className="font-mono tabular-nums font-bold text-slate-200">
+                        {pageMetrics.srcWidthPx} × {pageMetrics.srcHeightPx} px ({pageMetrics.srcWidthMm} × {pageMetrics.srcHeightMm} mm)
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between py-1 border-b border-slate-800/60">
+                      <span className="text-slate-400">عرض الهامش (من كل جهة):</span>
+                      <span dir="ltr" className="font-mono tabular-nums font-bold text-amber-300">
+                        {pageMetrics.marginPx} px ({pageMetrics.marginMm} mm)
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between py-1 border-b border-slate-800/60">
+                      <span className="text-slate-400">ارتفاع شريط التذييل:</span>
+                      <span dir="ltr" className="font-mono tabular-nums font-bold text-emerald-300">
+                        {pageMetrics.footerHeightPx} px ({pageMetrics.footerHeightMm} mm)
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between py-1.5 px-2 rounded-lg bg-amber-500/10 border border-amber-500/30">
+                      <span className="font-bold text-amber-200">الحجم النهائي لصفحة PDF:</span>
+                      <span dir="ltr" className="font-mono tabular-nums font-black text-amber-300">
+                        {pageMetrics.totalWidthPx} × {pageMetrics.totalHeightPx} px ({pageMetrics.totalWidthMm} × {pageMetrics.totalHeightMm} mm)
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* 2. Quick Interactive Adjustments inside Modal */}
+                <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3 space-y-3">
+                  <div className="text-xs font-extrabold text-white border-b border-slate-800 pb-1.5">
+                    تعديل فوري للهوامش والتذييل قبل التصدير:
+                  </div>
+
+                  {/* Margin Quick Selector */}
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between text-[11px]">
+                      <span className="text-slate-300 font-bold">الهوامش (Margins):</span>
+                      <span dir="ltr" className="font-mono text-amber-400 tabular-nums">
+                        {pageMetrics.marginPx}px ({pageMetrics.marginMm}mm)
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-4 gap-1">
+                      {[0, 40, 80, 120].map((val) => (
+                        <button
+                          key={val}
+                          type="button"
+                          onClick={() => updateSettings({ marginSizePx: val })}
+                          className={`py-1 rounded-lg text-[11px] font-mono tabular-nums font-bold border cursor-pointer ${
+                            activePdfSettings.marginSizePx === val
+                              ? 'bg-amber-500 text-slate-950 border-amber-500'
+                              : 'bg-slate-900 text-slate-300 border-slate-700 hover:border-amber-500/50'
+                          }`}
+                        >
+                          {val}px
+                        </button>
+                      ))}
+                    </div>
+
+                    {activePdfSettings.marginSizePx > 0 && (
+                      <div className="flex items-center gap-1.5 pt-1 flex-wrap">
+                        <span className="text-[10.5px] text-slate-400">لون الهامش:</span>
+                        {[
+                          { label: 'أبيض', hex: '#FFFFFF' },
+                          { label: 'كريمي', hex: '#F5EFE6' },
+                          { label: 'داكن', hex: '#18100C' },
+                          { label: 'واحة', hex: '#0E1F19' },
+                        ].map((c) => (
+                          <button
+                            key={c.hex}
+                            type="button"
+                            onClick={() => updateSettings({ marginColorHex: c.hex })}
+                            className={`px-2 py-0.5 rounded text-[10px] font-bold border flex items-center gap-1 cursor-pointer ${
+                              activePdfSettings.marginColorHex === c.hex
+                                ? 'border-amber-400 bg-amber-500/20 text-white'
+                                : 'border-slate-700 bg-slate-900 text-slate-400'
+                            }`}
+                          >
+                            <span
+                              className="w-2.5 h-2.5 rounded-full border border-black/30 inline-block"
+                              style={{ backgroundColor: c.hex }}
+                            />
+                            <span>{c.label}</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Footer Quick Controls */}
+                  <div className="space-y-2 pt-2 border-t border-slate-800">
+                    <div className="flex items-center justify-between">
+                      <label className="flex items-center gap-2 text-[11px] font-bold text-slate-200 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={activePdfSettings.enableFooter}
+                          onChange={(e) => updateSettings({ enableFooter: e.target.checked })}
+                          className="rounded border-slate-600 text-amber-500"
+                        />
+                        <span>إظهار شريط التذييل التلقائي (Footer)</span>
+                      </label>
+                      {activePdfSettings.enableFooter && (
+                        <label className="flex items-center gap-1 text-[10.5px] text-slate-400 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={activePdfSettings.includePageNumber}
+                            onChange={(e) =>
+                              updateSettings({ includePageNumber: e.target.checked })
+                            }
+                            className="rounded border-slate-600 text-amber-500"
+                          />
+                          <span>ترقيم الصفحات</span>
+                        </label>
+                      )}
+                    </div>
+
+                    {activePdfSettings.enableFooter && (
+                      <div className="space-y-2">
+                        <input
+                          type="text"
+                          value={activePdfSettings.storeName}
+                          onChange={(e) => updateSettings({ storeName: e.target.value })}
+                          placeholder="اسم المتجر في التذييل"
+                          className="w-full px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-xs text-white focus:outline-none focus:border-amber-500"
+                        />
+                        <input
+                          type="text"
+                          value={activePdfSettings.contactInfo}
+                          onChange={(e) => updateSettings({ contactInfo: e.target.value })}
+                          placeholder="معلومات التواصل (هاتف / واتساب)"
+                          className="w-full px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-xs text-white focus:outline-none focus:border-amber-500"
+                        />
+                        <input
+                          type="text"
+                          value={activePdfSettings.addressInfo}
+                          onChange={(e) => updateSettings({ addressInfo: e.target.value })}
+                          placeholder="العنوان أو الملاحظة الإضافية"
+                          className="w-full px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-xs text-white focus:outline-none focus:border-amber-500"
+                        />
+                        <div className="grid grid-cols-3 gap-1 pt-0.5">
+                          {[
+                            { id: 'dark_gold' as const, label: 'ذهبي داكن' },
+                            { id: 'light_clean' as const, label: 'فاتح للطباعة' },
+                            { id: 'emerald_oasis' as const, label: 'أخضر واحة' },
+                          ].map((st) => (
+                            <button
+                              key={st.id}
+                              type="button"
+                              onClick={() => updateSettings({ footerStyle: st.id })}
+                              className={`py-1 rounded-lg text-[10.5px] font-bold border cursor-pointer ${
+                                activePdfSettings.footerStyle === st.id
+                                  ? 'bg-amber-500/20 border-amber-400 text-amber-300'
+                                  : 'bg-slate-900 border-slate-700 text-slate-400'
+                              }`}
+                            >
+                              {st.label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Modal Footer Bar: Page Count Summary + Final Confirm & Export PDF Button */}
+            <div className="px-4 py-3 bg-[#141B22] border-t border-slate-800 flex items-center justify-between gap-3 flex-wrap">
+              <div className="text-xs text-slate-300 flex items-center gap-2 flex-wrap">
+                <span className="font-bold text-white">
+                  عدد الصفحات الجاهزة للتصدير: {modalSourcePages.length} صفحة
+                </span>
+                <span className="text-slate-600">·</span>
+                <span dir="ltr" className="font-mono tabular-nums text-amber-300">
+                  {pageMetrics.totalWidthPx}×{pageMetrics.totalHeightPx}px ({pageMetrics.totalWidthMm}×{pageMetrics.totalHeightMm}mm)
+                </span>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowPdfPreviewModal(false)}
+                  className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold cursor-pointer"
+                >
+                  إغلاق المعاينة
+                </button>
+                <button
+                  type="button"
+                  disabled={isExportingPdf}
+                  onClick={() => {
+                    onExportSelectedToPdf(
+                      effectiveImage,
+                      'butcher_shop_price_lists.pdf',
+                      activePdfSettings
+                    );
+                    setShowPdfPreviewModal(false);
+                  }}
+                  className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-extrabold flex items-center gap-1.5 cursor-pointer shadow-md disabled:opacity-50"
+                >
+                  {isExportingPdf ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <FileDown className="w-4 h-4" />
+                  )}
+                  <span>تأكيد وتصدير ملف PDF للطباعة الآن (300 DPI)</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
+

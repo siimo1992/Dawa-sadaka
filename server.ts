@@ -1,5 +1,6 @@
 import express from 'express';
 import type { Request, Response } from 'express';
+import { createServer as createHttpServer } from 'http';
 import dns from 'node:dns';
 import fs from 'fs';
 import path from 'path';
@@ -38,7 +39,7 @@ import { registerUpgradeRoutes, buildAinSalahTodaySummary } from './server/secur
 import { registerCommunityNewsRoutes } from './src/server/communityNewsServer.ts';
 import { registerCloudSqlAndTasksRoutes } from './src/server/cloudSqlAndTasksRoutes.ts';
 import { registerRafiqAlTariqRoutes } from './src/server/rafiqAlTariqServer.ts';
-import { registerApkReleaseRoutes } from './src/server/apkReleaseServer.ts';
+import { registerApkReleaseRoutes, verifyAndRepairApkRelease } from './src/server/apkReleaseServer.ts';
 import {
   normalizeQuery,
   hash,
@@ -84,6 +85,7 @@ import {
   getDeepSeekStatus,
   DEEPSEEK_DEFAULT_MODEL,
 } from './src/server/deepseekService.ts';
+import { attachGeminiLiveWebSocketServer } from './src/server/geminiLiveWsServer.ts';
 
 dotenv.config();
 
@@ -155,6 +157,114 @@ registerStorePriceListRoutes(app, ai);
 // Health check endpoint (لا تكشف المفاتيح)
 app.get('/api/health', (_req: Request, res: Response) => {
   return res.json({ status: 'ok' });
+});
+
+// ───────────────────────── المراقبة الدورية الشاملة والإصلاح التلقائي الصامت (System Watchdog) ─────────────────────────
+interface WatchdogSnapshot {
+  status: 'healthy' | 'repaired';
+  lastCheckAt: number;
+  uptimeSeconds: number;
+  memoryRssMb: number;
+  heapUsedMb: number;
+  autoRepairsCount: number;
+  lastRepairReason: string | null;
+  downloadReady: boolean;
+  downloadFileName: string;
+  downloadFileSize: string;
+  aiEngineReady: boolean;
+  activeCooldownsCleared: number;
+}
+
+let totalAutoRepairsCount = 0;
+let lastWatchdogRepairReason: string | null = null;
+let latestWatchdogSnapshot: WatchdogSnapshot | null = null;
+
+function runSystemWatchdog(forceFullRepair = false): WatchdogSnapshot {
+  const now = Date.now();
+  let repairsThisCycle = 0;
+  const reasons: string[] = [];
+
+  // 1. فحص وإصلاح جاهزية تنزيل التطبيق المباشر (APK)
+  const apkCheck = verifyAndRepairApkRelease();
+  if (apkCheck.repaired) {
+    repairsThisCycle++;
+    reasons.push('إصلاح وتجهيز حزمة التنزيل المباشر تلقائياً');
+  }
+
+  // 2. تنظيف فترات التهدئة المنتهية أو العالقة لنماذج الذكاء الاصطناعي والبحث
+  let cooldownsCleared = 0;
+  if (googleSearchCooldownUntil > 0 && (googleSearchCooldownUntil <= now || forceFullRepair)) {
+    googleSearchCooldownUntil = 0;
+    cooldownsCleared++;
+  }
+  for (const [modelName, untilTs] of Object.entries(modelCooldownUntil)) {
+    if (untilTs <= now || forceFullRepair) {
+      delete modelCooldownUntil[modelName];
+      cooldownsCleared++;
+    }
+  }
+  if (cooldownsCleared > 0) {
+    repairsThisCycle++;
+    reasons.push(`تحرير ${cooldownsCleared} من نماذج الذكاء الاصطناعي العالقة`);
+  }
+
+  // 3. تنظيف ذاكرة الملخص اليومي إذا انتهت صلاحيتها (> 6 ساعات) أو عند طلب إصلاح شامل
+  if (
+    dailyTickerCache &&
+    (forceFullRepair || now - dailyTickerCache.updatedAt > 6 * 60 * 60 * 1000)
+  ) {
+    dailyTickerCache = null;
+    repairsThisCycle++;
+    reasons.push('تحديث ذاكرة الملخص الإخباري اليومي');
+  }
+
+  if (repairsThisCycle > 0) {
+    totalAutoRepairsCount += repairsThisCycle;
+    lastWatchdogRepairReason = reasons.join(' + ');
+  }
+
+  const mem = process.memoryUsage();
+  const snapshot: WatchdogSnapshot = {
+    status: repairsThisCycle > 0 ? 'repaired' : 'healthy',
+    lastCheckAt: now,
+    uptimeSeconds: Math.floor(process.uptime()),
+    memoryRssMb: Math.round((mem.rss / (1024 * 1024)) * 10) / 10,
+    heapUsedMb: Math.round((mem.heapUsed / (1024 * 1024)) * 10) / 10,
+    autoRepairsCount: totalAutoRepairsCount,
+    lastRepairReason: lastWatchdogRepairReason,
+    downloadReady: apkCheck.ok,
+    downloadFileName: apkCheck.fileName,
+    downloadFileSize: apkCheck.fileSizeLabel,
+    aiEngineReady: Boolean(process.env.GEMINI_API_KEY || process.env.DEEPSEEK_API_KEY),
+    activeCooldownsCleared: cooldownsCleared,
+  };
+
+  latestWatchdogSnapshot = snapshot;
+  return snapshot;
+}
+
+// تشغيل الفحص الأولي فور إقلاع الخادم ثم دورياً كل 60 ثانية في الخلفية بصمت
+runSystemWatchdog(false);
+setInterval(() => {
+  try {
+    runSystemWatchdog(false);
+  } catch {}
+}, 60 * 1000).unref();
+
+app.get('/api/system/watchdog', (_req: Request, res: Response) => {
+  const snapshot = runSystemWatchdog(false);
+  res.setHeader('Cache-Control', 'no-store');
+  return res.json(snapshot);
+});
+
+app.post('/api/system/watchdog/repair', (_req: Request, res: Response) => {
+  const snapshot = runSystemWatchdog(true);
+  res.setHeader('Cache-Control', 'no-store');
+  return res.json({
+    ok: true,
+    message: 'تم إجراء الفحص الشامل وإصلاح الذاكرة والنماذج وحزمة التنزيل بنجاح.',
+    snapshot,
+  });
 });
 
 // الطقس الحي. لا تسمّه ONM إلا إذا المصدر فعلاً ONM.
@@ -928,41 +1038,43 @@ ${clientTimeInfo}
 // --- Tidikelt Agent Mode Detection & Constants (tidikelt-agent.ts integration) ---
 export type TidikeltMode = 'auto' | 'chat' | 'search' | 'code';
 
-export function makeSystemPrompt(replyStyle = 'ar'): string {
+export function makeSystemPrompt(replyStyle = 'ar-dz'): string {
   const style =
     replyStyle === 'ar-dz'
-      ? 'رد بلغة المستخدم: دارجة جزائرية بسيطة ومفهومة إذا كتب بها، أو فصحى بسيطة.'
-      : 'رد بلغة المستخدم: فصحى بسيطة، أو دارجة جزائرية إذا كتب بها.';
+      ? 'تحدث بمزيج متوازن من الدارجة الصحراوية الجزائرية الأصيلة (عين صالح، تيدكلت، أدرار، تمنراست، ورقلة، غرداية، بشار، والجنوب الجزائري) والعربية البسيطة الواضحة للجميع، وتعلّم من مفردات المستخدم الصحراوية الجزائرية ووظفها في الرد.'
+      : 'رد بمزيج من الدارجة الصحراوية الجزائرية الأصيلة والعربية المبسطة الواضحة للجميع.';
 
   return `
-أنت "تيديكلت AI"، مساعد ذكي داخل تطبيق تيديكلت. تساعد المستخدمين في المحادثة، والبحث عن المعلومات، وتحليل المستندات، والبرمجة.
+أنت نموذج ذكي مطور من منصة تيدكلت AI داخل تطبيق تيدكلت. تساعد المستخدمين في المحادثة، والبحث عن المعلومات، وتحليل المستندات، والبرمجة.
 
 الأسلوب:
 - ${style}
 - ابدأ بالجواب مباشرة، بدون مقدمات ولا تكرار للسؤال.
-- خلي الردود قصيرة وواضحة لأن الشاشة صغيرة. زد التفاصيل فقط إذا طلبها المستخدم.
-- نبرة دافئة ومحترمة، بدون تكلف.
+- خلي الردود قصيرة، سلسة، وواضحة لأن الشاشة صغيرة. زد التفاصيل فقط إذا طلبها المستخدم.
+- تحدث بروح أهل الصحراء الجزائرية وتيدكلت (نبرة دافئة، مضيافة، ومحترمة بدون تكلف).
+- اعتمد على الذاكرة قصيرة المدى (سياق الحوار الحالي) والذاكرة طويلة المدى (المعلومات والمفردات الصحراوية الجزائرية المحفوظة عن الزائر) لتخصيص ردودك وتعلّم لهجة الزائر باستمرار.
 - إذا كان الجواب خطوات، اكتبها في قائمة قصيرة مرقمة.
 - في الكود: اعط الكود جاهز مع شرح قصير جدا.
 - عند تحليل مستند: لخص أهم النقاط أولا، ثم اسأل المستخدم وش يحب يتعمق فيه.
 - إذا ما عرفتش الجواب، قل ذلك بصراحة ولا تخترع معلومات أو مصادر.
 - في المواضيع القانونية والطبية والمالية: اعط معلومة عامة وانصح المستخدم يستشير مختص.
 - لا تذكر "حالة الطريق" أو تنبيهات السفر والصحراء إلا إذا سأل المستخدم عنها صراحة وبشكل مباشر.
-- إذا سألك المستخدم من أنت، قل إنك مساعد تيديكلت AI.
+- قاعدة هوية صارمة ودائمة: إذا سألك المستخدم من أنت أو مع من يتحدث أو من طورك أو ما هو النموذج، قل دائماً إنك نموذج ذكي مطور من منصة تيدكلت AI، ولا تذكر أي شركة أو نموذج خارجي آخر.
 `.trim();
 }
 
-const TIDIKELT_SYSTEM_INSTRUCTION = makeSystemPrompt('ar').trim();
+const TIDIKELT_SYSTEM_INSTRUCTION = makeSystemPrompt('ar-dz').trim();
 
 const STYLE_INSTRUCTIONS: Record<string, string> = {
   "ar-dz": `
-رد بالدارجة الجزائرية البسيطة والمفهومة بنبرة دافئة ومحترمة بدون تكلف.
+رد بمزيج متوازن من الدارجة الصحراوية الجزائرية (تيدكلت وعين صالح والجنوب الجزائري) والعربية البسيطة الواضحة للجميع بنبرة دافئة ومحترمة بدون تكلف.
+تفاعل مع لهجة المستخدم الصحراوية الجزائرية وتعلّم عباراته ومفرداته المحلية ووظف ما تم حفظه في الذاكرة القصيرة والطويلة في سياق الرد.
 ابدأ بالجواب مباشرة بدون مقدمات ولا تكرار للسؤال، وخلي الردود قصيرة وواضحة لأن الشاشة صغيرة.
 حافظ على الحقائق والأرقام والتواريخ كما وردت في المصادر، ولا تذكر أو تضيف حالة الطريق أو نصائح السفر إلا إذا طلبها المستخدم صراحة.
 `.trim(),
 
   "ar": `
-رد بالعربية الفصحى البسيطة بنبرة دافئة ومحترمة بدون تكلف.
+رد بالعربية البسيطة الواضحة الممزوجة بروح ومصطلحات تيدكلت والصحراء الجزائرية بنبرة دافئة ومحترمة بدون تكلف.
 ابدأ بالجواب مباشرة بدون مقدمات ولا تكرار للسؤال، وخلي الردود قصيرة وواضحة لأن الشاشة صغيرة.
 حافظ على الحقائق والأرقام والمصادر كما وردت، ولا تذكر أو تضيف حالة الطريق أو نصائح السفر إلا إذا طلبها المستخدم صراحة.
 `.trim(),
@@ -980,7 +1092,7 @@ function detectDialectStyle(query: string, explicitChoice?: string): 'ar-dz' | '
     return explicitChoice;
   }
   const q = (query || '').toLowerCase();
-  const dzIndicators = /(واش|كيفاش|علاش|وقتاش|كاش|شحال|باغي|نحوس|راك|راكم|كاين|مكانش|ماكانش|بزاف|برك|ديال|تاع|حبيت|قولي|شكون|واش راك|لاباس|واش كاين|ما لقيتش|درك|دروك|مليح|مليحة|هدر|هدرة|حنا|نتوما|كيما|عطاني|نزيد|ندير|دير)/i;
+  const dzIndicators = /(واش|وشحالك|واش حالك|كيفاش|علاش|وقتاش|كاش|شحال|باغي|نحوس|راك|راكم|كاين|مكانش|ماكانش|بزاف|برك|ديال|تاع|حبيت|قولي|شكون|واش راك|لاباس|واش كاين|ما لقيتش|درك|دروك|مليح|مليحة|هدر|هدرة|حنا|نتوما|كيما|عطاني|نزيد|ندير|دير|واش خصك|نقولك)/i;
   const formalIndicators = /(ما هي|ما هو|لماذا|كيف يمكن|أرجو|يرجى|هل يمكن|هل من|ما سبب|اشرح لي|لخص|ماهي|ماهو|ما حكم|ما تعريف|قدم تحليلا|عرف|أوضح)/i;
 
   if (dzIndicators.test(q)) {
@@ -989,7 +1101,7 @@ function detectDialectStyle(query: string, explicitChoice?: string): 'ar-dz' | '
   if (formalIndicators.test(q)) {
     return 'ar';
   }
-  // Default confirmed by user: ar-dz (الدارجة الجزائرية)
+  // Default confirmed by user: ar-dz (الدارجة الصحراوية الجزائرية المتوازنة مع العربية البسيطة)
   return 'ar-dz';
 }
 
@@ -1005,10 +1117,16 @@ function analyzeAndReconfirmQuery(rawQuery: string, language: string): {
   const typoRules: Array<[RegExp, string]> = [
     [/(?:^|[\s،.؛!؟])(السول|السؤل|السوال)(?=[\s،.؛!؟]|$)/g, ' السؤال '],
     [/خورميات|خورزميات|خوارزميت/g, 'خوارزميات'],
-    [/تيدكلت|تدكلت/g, 'تيديكلت'],
+    [/تيدكلت|تدكلت|تيدكيكلت/g, 'تيديكلت'],
     [/اصطناعيي|الصطناعي|إصطناعي/g, 'اصطناعي'],
+    [/صحروية|صحرويه|الصحروية/g, 'الصحراوية'],
+    [/جتقطعات|تقطعت/g, 'تقطعات'],
+    [/المكلمة/g, 'المكالمة'],
+    [/يتعلخم|يتعلام/g, 'يتعلم'],
+    [/الذكرة/g, 'الذاكرة'],
+    [/ان وجدة|إن وجدة/g, 'إن وجدت'],
     [/برمجه/g, 'برمجة'],
-    [/(?:^|[\s،.؛!؟])(خطاء)(?=[\s،.؛!؟]|$)/g, ' خطأ '],
+    [/(?:^|[\s،.؛!؟])(خطاء|اخطاء)(?=[\s،.؛!؟]|$)/g, ' أخطاء '],
     [/(?:^|[\s،.؛!؟])(تاكد|تأكذ)(?=[\s،.؛!؟]|$)/g, ' التأكد '],
     [/تعتمل/g, 'تعتمد'],
     [/اقتراحت/g, 'اقتراحات'],
@@ -4850,7 +4968,10 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
+  const httpServer = createHttpServer(app);
+  attachGeminiLiveWebSocketServer(httpServer, ai);
+
+  httpServer.listen(PORT, '0.0.0.0', () => {
     console.log(`Server running at http://0.0.0.0:${PORT}`);
   });
 }
