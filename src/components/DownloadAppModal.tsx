@@ -223,11 +223,11 @@ export const DownloadAppModal: React.FC<DownloadAppModalProps> = ({
           </div>
 
           {/* Instructions Box depending on Device */}
-          <div className="p-3.5 rounded-xl bg-[var(--bg)] border border-[var(--line)] space-y-2 text-xs">
+          <div className="p-3.5 rounded-xl bg-[var(--bg)] border border-[var(--line)] space-y-2.5 text-xs">
             {activeDeviceTab === 'android' && (
-              <div className="space-y-2">
+              <div className="space-y-2.5">
                 <span className="font-extrabold text-[var(--ink)] block">
-                  خطوات التثبيت العادية على هواتف أندرويد (Chrome):
+                  خطوات التثبيت المباشر على هواتف أندرويد (Google Chrome):
                 </span>
                 <ol className="list-decimal list-inside space-y-1.5 text-[var(--mute)] leading-relaxed">
                   <li>
@@ -237,9 +237,38 @@ export const DownloadAppModal: React.FC<DownloadAppModalProps> = ({
                     اختر <strong className="text-[var(--green)]">«تثبيت التطبيق»</strong> أو <strong className="text-[var(--green)]">«إضافة إلى الشاشة الرئيسية»</strong>.
                   </li>
                   <li>
-                    اضغط <strong className="text-[var(--ink)]">تثبيت</strong>، وسيظهر التطبيق على شاشتك بأيقونته الرسمية ويعمل فوراً مثل أي تطبيق عادي.
+                    اضغط <strong className="text-[var(--ink)]">تثبيت</strong>، وسيظهر التطبيق فوراً على شاشتك بأيقونته الرسمية ويعمل كتطبيق كامل ومستقل.
                   </li>
                 </ol>
+
+                <div className="p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-700 dark:text-amber-300 text-[11px] leading-relaxed">
+                  <strong className="block font-bold mb-0.5">💡 لتفادي رسالة «يتعذر فتح الملف»:</strong>
+                  <span>
+                    هواتف أندرويد لا تفتح ملفات الاختصارات المنزلة في مجلد التنزيلات؛ التثبيت يتم مباشرة من داخل متصفح Chrome عبر القائمة (⋮) دون تنزيل أي ملف وسيط قد يسبب خطأ.
+                  </span>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    const cleanHost = window.location.host;
+                    const fallbackUrl = `${window.location.origin}/?install=1`;
+                    const intentUrl = `intent://${cleanHost}/?install=1#Intent;scheme=https;package=com.android.chrome;S.browser_fallback_url=${encodeURIComponent(fallbackUrl)};end`;
+                    try {
+                      if (window.top) {
+                        window.top.location.href = intentUrl;
+                      } else {
+                        window.location.href = intentUrl;
+                      }
+                    } catch {
+                      window.location.href = fallbackUrl;
+                    }
+                  }}
+                  className="w-full py-2 px-3 rounded-xl bg-[var(--green)]/15 border border-[var(--green)]/40 hover:bg-[var(--green)]/25 text-[var(--green)] text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer transition-colors"
+                >
+                  <Smartphone className="w-4 h-4" />
+                  <span>فتح الرابط في متصفح Chrome للتثبيت المباشر</span>
+                </button>
               </div>
             )}
 
@@ -263,7 +292,7 @@ export const DownloadAppModal: React.FC<DownloadAppModalProps> = ({
             )}
 
             {activeDeviceTab === 'desktop' && (
-              <div className="space-y-2">
+              <div className="space-y-2.5">
                 <span className="font-extrabold text-[var(--ink)] block">
                   خطوات التثبيت على الكمبيوتر (Windows / Mac / Linux):
                 </span>
@@ -275,9 +304,18 @@ export const DownloadAppModal: React.FC<DownloadAppModalProps> = ({
                     أو افتح قائمة المتصفح واضغط <strong className="text-[var(--green)]">«تثبيت تيديكلت AI»</strong>.
                   </li>
                   <li>
-                    سيعمل التطبيق في نافذة مستقلة وسريعة مع إمكانية وضعه على شريط المهام.
+                    أو حمّل اختصار سطح المكتب بنقرة واحدة أدناه.
                   </li>
                 </ol>
+
+                <a
+                  href="/api/apk/desktop-shortcut"
+                  download="Tidikelt-AI.url"
+                  className="w-full py-2 px-3 rounded-xl bg-[var(--green)] hover:opacity-95 text-white text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer transition-opacity no-underline shadow-xs"
+                >
+                  <Download className="w-4 h-4" />
+                  <span>تنزيل اختصار سطح المكتب للكمبيوتر (Tidikelt-AI.url)</span>
+                </a>
               </div>
             )}
           </div>

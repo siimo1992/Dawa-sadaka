@@ -334,7 +334,7 @@ export interface InteractiveResearchTreeProps {
   isRtl?: boolean;
 }
 
-export const InteractiveResearchTree: React.FC<InteractiveResearchTreeProps> = ({
+export const InteractiveResearchTree: React.FC<InteractiveResearchTreeProps> = React.memo(({
   treeData,
   isRtl = true,
 }) => {
@@ -500,6 +500,6 @@ export const InteractiveResearchTree: React.FC<InteractiveResearchTreeProps> = (
       </div>
     </div>
   );
-};
+});
 
 export default InteractiveResearchTree;

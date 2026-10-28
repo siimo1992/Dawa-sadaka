@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import {
   Check,
   Copy,
@@ -42,7 +42,7 @@ const CodeBlock: React.FC<{
   content: string;
   language?: string;
   isRtl?: boolean;
-}> = ({ content, language = 'code', isRtl = true }) => {
+}> = React.memo(({ content, language = 'code', isRtl = true }) => {
   const [isCopied, setIsCopied] = useState(false);
   const [isWrapped, setIsWrapped] = useState(false);
   const copyTimerRef = useRef<number | null>(null);
@@ -150,9 +150,9 @@ const CodeBlock: React.FC<{
       </pre>
     </div>
   );
-};
+});
 
-export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ content, isRtl = true }) => {
+export const MarkdownRenderer: React.FC<MarkdownRendererProps> = React.memo(({ content, isRtl = true }) => {
   type Block =
     | { type: 'code'; language?: string; content: string }
     | { type: 'text'; content: string };
@@ -493,7 +493,7 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ content, isR
     });
   };
 
-  const blocks = parseBlocks(content);
+  const blocks = useMemo(() => parseBlocks(content), [content]);
 
   return (
     <div
@@ -517,4 +517,4 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ content, isR
       })}
     </div>
   );
-};
+});

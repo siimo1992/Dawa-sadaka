@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import type { User as FirebaseUser } from 'firebase/auth';
+import { isTargetBanned } from '../utils/ownerControlStore';
 
 export interface NewsCommentItem {
   id: string;
@@ -330,12 +331,11 @@ export const CommunityNewsPage: React.FC<CommunityNewsPageProps> = ({
   }, []);
 
   const canEdit = (p: MahaliyatPost) => p.uid === ME && !getUser(ME).banned;
-  const canMenu = (p: MahaliyatPost) => isAdminMode || p.uid === ME;
+  const canMenu = (p: MahaliyatPost) => p.uid === ME;
   const isPostVisible = (p: MahaliyatPost) => {
-    if (isAdminMode) return true;
     const u = getUser(p.uid);
-    if (u.banned) return false;
-    if (p.review && p.uid !== ME) return false;
+    if (u.banned || isTargetBanned(u.name, p.source)) return false;
+    if (p.review && p.uid !== ME && !isAdminMode) return false;
     return true;
   };
 
@@ -347,8 +347,8 @@ export const CommunityNewsPage: React.FC<CommunityNewsPageProps> = ({
   };
 
   const handlePublish = async () => {
-    if (getUser(ME).banned) {
-      showToast('حسابك محظور من النشر');
+    if (getUser(ME).banned || isTargetBanned('أنت', composerSource)) {
+      showToast('حسابك محظور من النشر من قبل إدارة منصة تيدكلت AI');
       return;
     }
     const text = composerText.trim();
@@ -701,8 +701,8 @@ export const CommunityNewsPage: React.FC<CommunityNewsPageProps> = ({
 
       {/* Top Sticky Bar — Simplified & Optimized for Mobile */}
       <header className="bar">
-        <div className="bar-in">
-          <div className="brand">
+        <div className="bar-in max-w-3xl mx-auto px-3.5 sm:px-6 lg:px-8 py-2 flex items-center justify-between gap-2.5 sm:gap-4">
+          <div className="brand flex items-center gap-2.5 sm:gap-3 min-w-0 flex-1">
             {onToggleSidebar && (
               <button
                 type="button"
@@ -730,9 +730,9 @@ export const CommunityNewsPage: React.FC<CommunityNewsPageProps> = ({
                 className="w-full h-full object-cover rounded-[9px]"
               />
             </button>
-            <div className="brand-info">
-              <span className="brand-title">كاش ما تعرف</span>
-              <span className="loc" id="loc" title="أخبار ومستجدات المجتمع المحلي">
+            <div className="brand-info space-y-0.5">
+              <span className="brand-title text-sm sm:text-base font-extrabold tracking-tight">كاش ما تعرف</span>
+              <span className="loc text-[11px] sm:text-xs" id="loc" title="أخبار ومستجدات المجتمع المحلي">
                 <svg className="i i-12 text-[var(--green)]" aria-hidden="true">
                   <use href="#i-pin" />
                 </svg>
@@ -741,11 +741,11 @@ export const CommunityNewsPage: React.FC<CommunityNewsPageProps> = ({
             </div>
           </div>
 
-          <div className="bar-actions">
+          <div className="bar-actions flex items-center gap-1.5 sm:gap-2 shrink-0">
             {onOpenRafiq && (
               <button
                 type="button"
-                className="rafiq-switch-btn"
+                className="rafiq-switch-btn px-3 sm:px-3.5 py-1.5 text-xs sm:text-[13px]"
                 aria-label="الانتقال إلى قسم الرحالة (كاش بلاصة معك)"
                 title="كاش بلاصة معك · الرحالة"
                 onClick={onOpenRafiq}
@@ -761,7 +761,8 @@ export const CommunityNewsPage: React.FC<CommunityNewsPageProps> = ({
               className="ib"
               id="sBtn"
               type="button"
-              aria-label="بحث"
+              aria-label="بحث في المستجدات"
+              title="بحث في المستجدات"
               aria-pressed={isSearchOpen}
               onClick={() => {
                 const next = !isSearchOpen;
@@ -784,8 +785,8 @@ export const CommunityNewsPage: React.FC<CommunityNewsPageProps> = ({
                 id="pBtn"
                 type="button"
                 aria-label="لوحة التحكم"
-                title="لوحة تحكم المشرف والمالك"
-                onClick={() => setIsAdminPanelOpen(true)}
+                title="فتح جهة الأخبار في لوحة تحكم المالك"
+                onClick={onOpenAdmin}
               >
                 <svg className="i">
                   <use href="#i-panel" />
@@ -807,8 +808,8 @@ export const CommunityNewsPage: React.FC<CommunityNewsPageProps> = ({
           </div>
         </div>
 
-        <div className={`searchrow${isSearchOpen ? ' open' : ''}`} id="sRow">
-          <label className="field">
+        <div className={`searchrow max-w-3xl mx-auto px-3.5 sm:px-6 lg:px-8 pb-3${isSearchOpen ? ' open' : ''}`} id="sRow">
+          <label className="field px-3.5 py-2 gap-2.5">
             <svg className="i">
               <use href="#i-search" />
             </svg>
@@ -821,6 +822,7 @@ export const CommunityNewsPage: React.FC<CommunityNewsPageProps> = ({
               placeholder="ابحث في المنشورات أو الأحياء..."
               aria-label="ابحث في الأخبار"
               autoComplete="off"
+              className="text-sm sm:text-[15px] leading-relaxed"
             />
             {searchQuery && (
               <button
@@ -838,20 +840,20 @@ export const CommunityNewsPage: React.FC<CommunityNewsPageProps> = ({
         </div>
       </header>
 
-      <div className="mahaliyat-main">
+      <div className="mahaliyat-main max-w-3xl mx-auto w-full px-3.5 sm:px-6 lg:px-8 pt-4 sm:pt-6 pb-28 space-y-4 sm:space-y-5">
         {/* Post Composer */}
         <section
           ref={composerRef}
-          className={`composer${isComposerOpen ? ' open' : ''}`}
+          className={`composer p-3.5 sm:p-5 rounded-2xl transition-all${isComposerOpen ? ' open' : ''}`}
           id="comp"
           aria-label="إنشاء منشور"
         >
-          <div className="c-top">
-            <span className="av" aria-hidden="true">
+          <div className="c-top flex items-center gap-2.5 sm:gap-3.5">
+            <span className="av w-9 h-9 sm:w-10 sm:h-10 text-sm sm:text-base" aria-hidden="true">
               ع
             </span>
             <button
-              className="prompt"
+              className="prompt px-3.5 sm:px-4 py-2 sm:py-2.5 text-xs sm:text-sm leading-relaxed"
               id="prompt"
               type="button"
               onClick={openComposer}
@@ -861,7 +863,7 @@ export const CommunityNewsPage: React.FC<CommunityNewsPageProps> = ({
             {!isComposerOpen && (
               <button
                 type="button"
-                className="quick-post-btn"
+                className="quick-post-btn px-3.5 sm:px-4 py-2 text-xs sm:text-sm gap-1.5"
                 onClick={openComposer}
               >
                 <svg className="i i-16" aria-hidden="true">
@@ -871,7 +873,7 @@ export const CommunityNewsPage: React.FC<CommunityNewsPageProps> = ({
               </button>
             )}
           </div>
-          <div className="c-more">
+          <div className="c-more mt-3.5 sm:mt-4 gap-3 sm:gap-3.5">
             <textarea
               ref={txtRef}
               id="txt"
@@ -880,9 +882,10 @@ export const CommunityNewsPage: React.FC<CommunityNewsPageProps> = ({
               onChange={(e) => setComposerText(e.target.value)}
               aria-label="نص الخبر"
               placeholder="اكتب الخبر أو الإعلان بوضوح..."
+              className="p-3 sm:p-3.5 text-sm sm:text-[15px] leading-relaxed"
             />
-            <div className="grid2">
-              <label className="field">
+            <div className="grid2 gap-2.5 sm:gap-3">
+              <label className="field px-3 sm:px-3.5">
                 <svg className="i">
                   <use href="#i-list" />
                 </svg>
@@ -891,6 +894,7 @@ export const CommunityNewsPage: React.FC<CommunityNewsPageProps> = ({
                   aria-label="التصنيف"
                   value={composerCat}
                   onChange={(e) => setComposerCat(e.target.value as CategoryKey)}
+                  className="text-xs sm:text-sm"
                 >
                   {(Object.entries(CATS) as [CategoryKey, [string, string]][]).map(
                     ([k, v]) => (
@@ -901,7 +905,7 @@ export const CommunityNewsPage: React.FC<CommunityNewsPageProps> = ({
                   )}
                 </select>
               </label>
-              <label className="field">
+              <label className="field px-3 sm:px-3.5">
                 <svg className="i">
                   <use href="#i-pin" />
                 </svg>
@@ -911,10 +915,11 @@ export const CommunityNewsPage: React.FC<CommunityNewsPageProps> = ({
                   onChange={(e) => setComposerPlace(e.target.value)}
                   aria-label="الحي أو البلدية"
                   placeholder="الحي أو القصر (اختياري)"
+                  className="text-xs sm:text-sm"
                 />
               </label>
             </div>
-            <label className="field">
+            <label className="field px-3 sm:px-3.5">
               <svg className="i">
                 <use href="#i-link" />
               </svg>
@@ -924,20 +929,22 @@ export const CommunityNewsPage: React.FC<CommunityNewsPageProps> = ({
                 onChange={(e) => setComposerSource(e.target.value)}
                 aria-label="المصدر"
                 placeholder="المصدر أو الرابط (اختياري)"
+                className="text-xs sm:text-sm"
               />
             </label>
-            <div className="hint">
+            <div className="hint text-xs sm:text-[13px] leading-relaxed py-0.5">
               <svg className="i i-16">
                 <use href="#i-shield" />
               </svg>
               <span>تحقق من الخبر قبل نشره واحترم خصوصية الناس.</span>
             </div>
-            <div className="c-bar">
+            <div className="c-bar flex items-center flex-wrap gap-2 sm:gap-3 pt-1">
               <button
                 className="ib"
                 id="attach"
                 type="button"
                 aria-label="إرفاق صورة أو فيديو"
+                title="إرفاق صورة أو فيديو"
                 onClick={() => fileInputRef.current?.click()}
               >
                 <svg className="i">
@@ -964,6 +971,7 @@ export const CommunityNewsPage: React.FC<CommunityNewsPageProps> = ({
                   type="button"
                   id="fx"
                   aria-label="إزالة المرفق"
+                  title="إزالة المرفق"
                   onClick={() => {
                     setAttachedFile(null);
                     if (fileInputRef.current) fileInputRef.current.value = '';
@@ -976,13 +984,13 @@ export const CommunityNewsPage: React.FC<CommunityNewsPageProps> = ({
               </span>
               <button
                 type="button"
-                className="cancel-compose-btn"
+                className="cancel-compose-btn px-3.5 sm:px-4 text-xs sm:text-sm"
                 onClick={() => setIsComposerOpen(false)}
               >
                 إلغاء
               </button>
               <button
-                className="send"
+                className="send px-4 sm:px-5 text-xs sm:text-sm"
                 id="pub"
                 type="button"
                 onClick={handlePublish}
@@ -997,9 +1005,14 @@ export const CommunityNewsPage: React.FC<CommunityNewsPageProps> = ({
         </section>
 
         {/* Category Filter Chips */}
-        <div className="chips" id="chips" role="group" aria-label="التصنيف">
+        <div
+          className="chips flex items-center gap-2 sm:gap-2.5 py-1.5 sm:py-2 overflow-x-auto"
+          id="chips"
+          role="group"
+          aria-label="التصنيف"
+        >
           <button
-            className="chip"
+            className="chip px-3.5 py-1.5 sm:px-4 sm:py-2 text-xs sm:text-[13.5px] leading-normal"
             type="button"
             aria-pressed={selectedCat === 'all'}
             onClick={() => setSelectedCat('all')}
@@ -1013,7 +1026,7 @@ export const CommunityNewsPage: React.FC<CommunityNewsPageProps> = ({
             ([k, v]) => (
               <button
                 key={k}
-                className="chip"
+                className="chip px-3.5 py-1.5 sm:px-4 sm:py-2 text-xs sm:text-[13.5px] leading-normal"
                 type="button"
                 aria-pressed={selectedCat === k}
                 onClick={() => setSelectedCat(k)}
@@ -1028,16 +1041,16 @@ export const CommunityNewsPage: React.FC<CommunityNewsPageProps> = ({
         </div>
 
         {/* Count & Sort Toolbar */}
-        <div className="tool">
-          <span className="m" id="count" aria-live="polite">
+        <div className="tool flex items-center justify-between gap-3 py-1.5 sm:py-2 px-1 text-xs sm:text-sm">
+          <span className="m inline-flex items-center gap-1.5 sm:gap-2" id="count" aria-live="polite">
             <svg className="i i-16" aria-hidden="true">
               <use href="#i-news" />
             </svg>
-            <b>{filteredPosts.length}</b>
+            <b className="text-sm sm:text-base tabular-nums">{filteredPosts.length}</b>
             <span>{filteredPosts.length === 1 ? 'منشور معروض' : 'منشورات معروضة'}</span>
           </span>
           <button
-            className="sort"
+            className="sort px-3 sm:px-3.5 py-1.5 text-xs sm:text-[13px] gap-1.5"
             id="sort"
             type="button"
             onClick={() => setSortBy((prev) => (prev === 'new' ? 'top' : 'new'))}
@@ -1050,9 +1063,9 @@ export const CommunityNewsPage: React.FC<CommunityNewsPageProps> = ({
         </div>
 
         {/* Feed List */}
-        <div className="feed" id="feed">
+        <div className="feed grid grid-cols-1 gap-3.5 sm:gap-5 w-full" id="feed">
           {filteredPosts.length === 0 ? (
-            <div className="empty">
+            <div className="empty py-10 sm:py-14 px-4 space-y-2.5 text-sm sm:text-base">
               <svg className="i" aria-hidden="true">
                 <use href="#i-search" />
               </svg>
@@ -1072,19 +1085,21 @@ export const CommunityNewsPage: React.FC<CommunityNewsPageProps> = ({
               return (
                 <article
                   key={p.id}
-                  className={`card cat-${p.cat}${u.banned ? ' banned' : ''}`}
+                  className={`card cat-${p.cat}${u.banned ? ' banned' : ''} p-4 sm:p-5 md:p-6 rounded-2xl transition-all`}
                   data-id={p.id}
                 >
-                  <div className="head">
+                  <div className="head flex items-start justify-between gap-3 sm:gap-4">
                     <span
-                      className={`av${u.verified ? ' off' : ''}`}
+                      className={`av w-9 h-9 sm:w-10 sm:h-10 text-sm sm:text-base${u.verified ? ' off' : ''}`}
                       aria-hidden="true"
                     >
                       {u.name.charAt(0)}
                     </span>
-                    <div className="who">
-                      <div className="line">
-                        <span className="author-name">{u.name}</span>
+                    <div className="who flex-1 min-w-0 space-y-1">
+                      <div className="line flex items-center flex-wrap gap-1.5 sm:gap-2 text-sm sm:text-[15.5px] font-extrabold leading-snug">
+                        <span className="author-name truncate max-w-[180px] sm:max-w-xs md:max-w-md">
+                          {u.name}
+                        </span>
                         {u.verified && (
                           <span className="ok" title="موثّق" aria-label="موثّق">
                             <svg className="i i-16" aria-hidden="true">
@@ -1092,15 +1107,15 @@ export const CommunityNewsPage: React.FC<CommunityNewsPageProps> = ({
                             </svg>
                           </span>
                         )}
-                        {p.demo && <span className="pill">تجريبي</span>}
-                        {p.review && <span className="pill rev">قيد المراجعة</span>}
-                        {u.banned && <span className="pill ban">محظور</span>}
+                        {p.demo && <span className="pill px-2 py-0.5 text-[11px]">تجريبي</span>}
+                        {p.review && <span className="pill rev px-2 py-0.5 text-[11px]">قيد المراجعة</span>}
+                        {u.banned && <span className="pill ban px-2 py-0.5 text-[11px]">محظور</span>}
                       </div>
-                      <div className="meta">
+                      <div className="meta flex items-center flex-wrap gap-1.5 sm:gap-2 text-xs sm:text-[13px] leading-relaxed">
                         <span>{ago(p.ts)}</span>
                         {p.edited && <span> · عُدّل</span>}
                         {p.place && (
-                          <span className="place-tag">
+                          <span className="place-tag px-2 py-0.5 text-[11px] sm:text-xs gap-1">
                             <svg className="i i-12" aria-hidden="true">
                               <use href="#i-pin" />
                             </svg>
@@ -1110,8 +1125,8 @@ export const CommunityNewsPage: React.FC<CommunityNewsPageProps> = ({
                       </div>
                     </div>
 
-                    <div className="head-end">
-                      <span className={`cat cat-badge-${p.cat}`}>
+                    <div className="head-end flex items-center gap-1.5 sm:gap-2 shrink-0">
+                      <span className={`cat cat-badge-${p.cat} px-2.5 py-1 sm:px-3 sm:py-1 text-[11.5px] sm:text-xs gap-1.5`}>
                         <svg className="i" aria-hidden="true">
                           <use href={`#i-${c[0]}`} />
                         </svg>
@@ -1126,6 +1141,7 @@ export const CommunityNewsPage: React.FC<CommunityNewsPageProps> = ({
                             aria-haspopup="menu"
                             aria-expanded={isMenuOpen}
                             aria-label="خيارات المنشور"
+                            title="خيارات المنشور"
                             onClick={() =>
                               setOpenMenuPostId((prev) =>
                                 prev === p.id ? null : p.id
@@ -1223,15 +1239,15 @@ export const CommunityNewsPage: React.FC<CommunityNewsPageProps> = ({
                   </div>
 
                   {isEditing ? (
-                    <div className="editbox">
+                    <div className="editbox mt-3.5 sm:mt-4 gap-2.5 sm:gap-3">
                       <textarea
-                        className="etxt"
+                        className="etxt p-3 sm:p-3.5 text-sm sm:text-[15px] leading-relaxed"
                         maxLength={600}
                         aria-label="تعديل المنشور"
                         value={editingText}
                         onChange={(e) => setEditingText(e.target.value)}
                       />
-                      <div className="q-acts">
+                      <div className="q-acts gap-2.5">
                         <button
                           type="button"
                           className="ap"
@@ -1257,18 +1273,28 @@ export const CommunityNewsPage: React.FC<CommunityNewsPageProps> = ({
                       </div>
                     </div>
                   ) : (
-                    <p className="txt">{p.text}</p>
+                    <p className="txt mt-3 sm:mt-3.5 text-[14.5px] sm:text-[15.5px] md:text-base leading-[1.8] sm:leading-[1.9] tracking-normal break-words whitespace-pre-line">
+                      {p.text}
+                    </p>
                   )}
 
                   {p.media &&
                     (p.media.video ? (
-                      <video className="media" controls src={p.media.url} />
+                      <video
+                        className="media mt-3.5 sm:mt-4 rounded-xl sm:rounded-2xl max-h-72 sm:max-h-96 w-full object-cover"
+                        controls
+                        src={p.media.url}
+                      />
                     ) : (
-                      <img className="media" alt="" src={p.media.url} />
+                      <img
+                        className="media mt-3.5 sm:mt-4 rounded-xl sm:rounded-2xl max-h-72 sm:max-h-96 w-full object-cover"
+                        alt=""
+                        src={p.media.url}
+                      />
                     ))}
 
                   {p.source && (
-                    <div className="src">
+                    <div className="src mt-3 sm:mt-3.5 px-3 py-1.5 rounded-lg text-xs sm:text-[13px] leading-relaxed inline-flex items-center gap-2">
                       <svg className="i i-14" aria-hidden="true">
                         <use href="#i-link" />
                       </svg>
@@ -1288,12 +1314,13 @@ export const CommunityNewsPage: React.FC<CommunityNewsPageProps> = ({
                     </div>
                   )}
 
-                  <div className="acts">
+                  <div className="acts flex items-center gap-2 sm:gap-3 mt-3.5 sm:mt-4 pt-3 sm:pt-3.5">
                     <button
-                      className="act"
+                      className="act px-3 py-1.5 sm:px-3.5 sm:py-2 rounded-xl text-xs sm:text-[13.5px] min-h-[36px] sm:min-h-[38px] gap-1.5 sm:gap-2 transition-colors"
                       type="button"
                       aria-pressed={liked}
-                      aria-label="مفيد"
+                      aria-label="تسجيل إعجاب مفيد"
+                      title="علامة مفيد"
                       onClick={() => handleToggleLike(p.id)}
                     >
                       <svg className="i i-16" aria-hidden="true">
@@ -1304,10 +1331,11 @@ export const CommunityNewsPage: React.FC<CommunityNewsPageProps> = ({
                     </button>
 
                     <button
-                      className="act"
+                      className="act px-3 py-1.5 sm:px-3.5 sm:py-2 rounded-xl text-xs sm:text-[13.5px] min-h-[36px] sm:min-h-[38px] gap-1.5 sm:gap-2 transition-colors"
                       type="button"
                       aria-pressed={isCommentsOpen}
-                      aria-label="التعليقات"
+                      aria-label="عرض التعليقات"
+                      title="عرض وإضافة تعليقات"
                       onClick={() => handleToggleComments(p.id)}
                     >
                       <svg className="i i-16" aria-hidden="true">
@@ -1318,9 +1346,10 @@ export const CommunityNewsPage: React.FC<CommunityNewsPageProps> = ({
                     </button>
 
                     <button
-                      className="act"
+                      className="act px-3 py-1.5 sm:px-3.5 sm:py-2 rounded-xl text-xs sm:text-[13.5px] min-h-[36px] sm:min-h-[38px] gap-1.5 sm:gap-2 transition-colors"
                       type="button"
-                      aria-label="مشاركة"
+                      aria-label="مشاركة المنشور"
+                      title="مشاركة المنشور"
                       onClick={() => handleShare(p)}
                     >
                       <svg className="i i-16" aria-hidden="true">
@@ -1330,7 +1359,7 @@ export const CommunityNewsPage: React.FC<CommunityNewsPageProps> = ({
                     </button>
 
                     <button
-                      className="act end"
+                      className="act end px-2.5 py-1.5 sm:px-3 sm:py-2 rounded-xl min-h-[36px] sm:min-h-[38px]"
                       type="button"
                       aria-label="إبلاغ"
                       title="إبلاغ عن المنشور"
@@ -1343,14 +1372,17 @@ export const CommunityNewsPage: React.FC<CommunityNewsPageProps> = ({
                   </div>
 
                   {isCommentsOpen && (
-                    <div className="cmts">
+                    <div className="cmts mt-3.5 sm:mt-4 pt-1 space-y-2 sm:space-y-2.5">
                       {p.comments.map((cmtText, idx) => (
-                        <div key={idx} className="cmt">
+                        <div
+                          key={idx}
+                          className="cmt px-3.5 py-2.5 sm:px-4 sm:py-3 rounded-xl text-[13px] sm:text-sm leading-relaxed"
+                        >
                           {cmtText}
                         </div>
                       ))}
                       <form
-                        className="cform"
+                        className="cform flex items-center gap-2 sm:gap-2.5 pt-1"
                         onSubmit={(e) => handleAddComment(e, p.id)}
                       >
                         <input
@@ -1365,8 +1397,9 @@ export const CommunityNewsPage: React.FC<CommunityNewsPageProps> = ({
                               [p.id]: e.target.value,
                             }))
                           }
+                          className="px-4 text-xs sm:text-sm leading-normal"
                         />
-                        <button type="submit" aria-label="إرسال">
+                        <button type="submit" aria-label="إرسال التعليق" title="إرسال التعليق">
                           <svg className="i i-16" aria-hidden="true">
                             <use href="#i-send" />
                           </svg>
@@ -1398,7 +1431,7 @@ export const CommunityNewsPage: React.FC<CommunityNewsPageProps> = ({
                 <span>لوحة تحكم المشرف</span>
                 <button
                   type="button"
-                  className="chip ms-auto"
+                  className="chip ms-auto px-3 py-1.5 text-xs"
                   onClick={() => {
                     setIsAdminPanelOpen(false);
                     onOpenAdmin();
@@ -1443,9 +1476,9 @@ export const CommunityNewsPage: React.FC<CommunityNewsPageProps> = ({
                 </div>
               </div>
 
-              <div className="chips" id="aTabs" role="group" aria-label="أقسام اللوحة">
+              <div className="chips flex items-center gap-2 py-1" id="aTabs" role="group" aria-label="أقسام اللوحة">
                 <button
-                  className="chip"
+                  className="chip px-3.5 py-1.5 text-xs sm:text-sm"
                   type="button"
                   aria-pressed={adminTab === 'users'}
                   onClick={() => setAdminTab('users')}
@@ -1456,7 +1489,7 @@ export const CommunityNewsPage: React.FC<CommunityNewsPageProps> = ({
                   الناشرون
                 </button>
                 <button
-                  className="chip"
+                  className="chip px-3.5 py-1.5 text-xs sm:text-sm"
                   type="button"
                   aria-pressed={adminTab === 'queue'}
                   onClick={() => setAdminTab('queue')}
@@ -1477,13 +1510,13 @@ export const CommunityNewsPage: React.FC<CommunityNewsPageProps> = ({
                       return (
                         <div key={u.id} className="urow">
                           <span
-                            className={`av${u.verified ? ' off' : ''}`}
+                            className={`av w-9 h-9 text-sm${u.verified ? ' off' : ''}`}
                             aria-hidden="true"
                           >
                             {u.name.charAt(0)}
                           </span>
-                          <div className="who">
-                            <div className="line">
+                          <div className="who space-y-0.5">
+                            <div className="line flex items-center flex-wrap gap-1.5 text-sm font-extrabold">
                               <span>{u.name}</span>
                               {u.verified && (
                                 <span className="ok" title="موثّق" aria-label="موثّق">
@@ -1492,9 +1525,9 @@ export const CommunityNewsPage: React.FC<CommunityNewsPageProps> = ({
                                   </svg>
                                 </span>
                               )}
-                              {u.banned && <span className="pill ban">محظور</span>}
+                              {u.banned && <span className="pill ban px-2 py-0.5 text-[11px]">محظور</span>}
                             </div>
-                            <div className="meta">
+                            <div className="meta text-xs">
                               {n}
                               {n === 1 ? ' منشور' : ' منشورات'}
                             </div>

@@ -1,4 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
+import {
+  isTargetBanned,
+  loadRafiqRides,
+  saveRafiqRides,
+  loadRafiqDrivers,
+  saveRafiqDrivers,
+} from '../utils/ownerControlStore';
 
 export type CompanionType = 'CO_DRIVER' | 'COST_SHARE' | 'FAMILY_ONLY';
 export type RideFilterType = 'all' | 'companion' | 'fuel' | 'family' | 'free';
@@ -39,6 +46,7 @@ interface RafiqAlTariqModalProps {
   onBackToChat?: () => void;
   onToggleSidebar?: () => void;
   onOpenNews?: () => void;
+  onOpenAdmin?: () => void;
 }
 
 const iso = (d: Date) =>
@@ -131,10 +139,11 @@ export const RafiqAlTariqModal: React.FC<RafiqAlTariqModalProps> = ({
   onBackToChat,
   onToggleSidebar,
   onOpenNews,
+  onOpenAdmin,
 }) => {
   const ME = 'u0';
-  const [drivers, setDrivers] = useState<RafiqDriverUser[]>(INITIAL_DRIVERS);
-  const [rides, setRides] = useState<RafiqUiRide[]>(INITIAL_RIDES);
+  const [drivers, setDrivers] = useState<RafiqDriverUser[]>(() => loadRafiqDrivers() || INITIAL_DRIVERS);
+  const [rides, setRides] = useState<RafiqUiRide[]>(() => loadRafiqRides() || INITIAL_RIDES);
   const [flt, setFlt] = useState<RideFilterType>('all');
 
   // Search inputs
@@ -273,12 +282,27 @@ export const RafiqAlTariqModal: React.FC<RafiqAlTariqModalProps> = ({
   const isVisible = embedded || Boolean(isOpen);
 
   useEffect(() => {
+    const syncStore = () => {
+      setDrivers(loadRafiqDrivers());
+      setRides(loadRafiqRides());
+    };
+    window.addEventListener('tidikelt-owner-sync', syncStore);
+    window.addEventListener('storage', syncStore);
+    return () => {
+      window.removeEventListener('tidikelt-owner-sync', syncStore);
+      window.removeEventListener('storage', syncStore);
+    };
+  }, []);
+
+  useEffect(() => {
     if (!isVisible) return;
     fetch('/api/rafiq/rides')
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
-        if (data && Array.isArray(data.rides) && data.rides.length > 0) {
-          setRides(data.rides.slice(0, 12).map(mapServerRideToUi));
+        if (data && Array.isArray(data.rides) && data.rides.length > 0 && !localStorage.getItem('tidikelt_rafiq_rides_v1')) {
+          const mapped = data.rides.slice(0, 12).map(mapServerRideToUi);
+          setRides(mapped);
+          saveRafiqRides(mapped);
         }
       })
       .catch(() => {});
@@ -311,13 +335,12 @@ export const RafiqAlTariqModal: React.FC<RafiqAlTariqModalProps> = ({
   if (!isVisible) return null;
 
   const canEditRide = (r: RafiqUiRide) =>
-    (r.uid === ME || r.who === 'أنت') && !getDriver(ME).banned;
-  const canMenuRide = (r: RafiqUiRide) => isAdminMode || r.uid === ME || r.who === 'أنت';
+    (r.uid === ME || r.who === 'أنت') && !getDriver(ME).banned && !isTargetBanned(r.phone, r.who);
+  const canMenuRide = (r: RafiqUiRide) => r.uid === ME || r.who === 'أنت';
   const isRideVisible = (r: RafiqUiRide) => {
-    if (isAdminMode) return true;
     const d = getDriver(r.uid, r.who);
-    if (d.banned) return false;
-    if (r.review && r.uid !== ME && r.who !== 'أنت') return false;
+    if (d.banned || isTargetBanned(r.phone, r.who)) return false;
+    if (r.review && r.uid !== ME && r.who !== 'أنت' && !isAdminMode) return false;
     return true;
   };
 
@@ -553,6 +576,10 @@ export const RafiqAlTariqModal: React.FC<RafiqAlTariqModalProps> = ({
       showToast('رقم الهاتف غير صحيح');
       return;
     }
+    if (isTargetBanned(cleanPhone, 'أنت')) {
+      showToast('عذراً، هذا الرقم محظور من النشر من قبل إدارة منصة تيدكلت AI');
+      return;
+    }
 
     const newPrice = pType === 'companion' ? 0 : Math.max(0, Number(pPrice) || 0);
     const newSeats = Math.max(1, Number(pSeats) || 1);
@@ -631,7 +658,11 @@ export const RafiqAlTariqModal: React.FC<RafiqAlTariqModalProps> = ({
       review: !isAdminMode,
     };
 
-    setRides((prev) => [newRide, ...prev]);
+    setRides((prev) => {
+      const next = [newRide, ...prev];
+      saveRafiqRides(next);
+      return next;
+    });
     setFlt('all');
     setFromVal('');
     setToVal('');
@@ -835,6 +866,8 @@ export const RafiqAlTariqModal: React.FC<RafiqAlTariqModalProps> = ({
               className="pub"
               id="pubBtn"
               type="button"
+              aria-label="انشر رحلة جديدة"
+              title="انشر رحلة جديدة"
               onClick={openPublishModalForNew}
             >
               <Icon name="plus" />
@@ -857,9 +890,15 @@ export const RafiqAlTariqModal: React.FC<RafiqAlTariqModalProps> = ({
               id="pBtn"
               type="button"
               hidden={!isAdminMode}
-              onClick={() => setIsAdminPanelOpen(true)}
+              onClick={() => {
+                if (onOpenAdmin) {
+                  onOpenAdmin();
+                } else {
+                  setIsAdminPanelOpen(true);
+                }
+              }}
               aria-label="لوحة تحكم المالك"
-              title="لوحة تحكم المالك"
+              title="فتح جهة رفيق الطريق في لوحة تحكم المالك"
             >
               <Icon name="panel" />
             </button>
@@ -878,7 +917,7 @@ export const RafiqAlTariqModal: React.FC<RafiqAlTariqModalProps> = ({
       </header>
 
       {/* Main Content */}
-      <main>
+      <main className="rafiq-main-content">
         <form
           className="search"
           id="sf"
@@ -999,13 +1038,14 @@ export const RafiqAlTariqModal: React.FC<RafiqAlTariqModalProps> = ({
                   setDateVal('');
                   setPaxVal(1);
                 }}
-                aria-label="إلغاء الفلترة"
+                aria-label="إلغاء الفلترة ومسح حقول البحث"
+                title="إلغاء الفلترة ومسح البحث"
               >
                 <Icon name="x" />
                 <span className="search-label">مسح</span>
               </button>
             ) : (
-              <button className="go" type="submit" aria-label="بحث">
+              <button className="go" type="submit" aria-label="البحث عن الرحلات" title="البحث عن الرحلات">
                 <Icon name="search" />
                 <span className="search-label">بحث</span>
               </button>
@@ -1019,6 +1059,8 @@ export const RafiqAlTariqModal: React.FC<RafiqAlTariqModalProps> = ({
             type="button"
             data-f="all"
             aria-pressed={flt === 'all'}
+            aria-label="عرض جميع الرحلات"
+            title="عرض جميع الرحلات"
             onClick={() => setFlt('all')}
           >
             <Icon name="list" />
@@ -1029,6 +1071,8 @@ export const RafiqAlTariqModal: React.FC<RafiqAlTariqModalProps> = ({
             type="button"
             data-f="companion"
             aria-pressed={flt === 'companion'}
+            aria-label="عرض رحلات رفيق القيادة"
+            title="عرض رحلات رفيق القيادة"
             onClick={() => setFlt('companion')}
           >
             <Icon name="wheel" />
@@ -1039,6 +1083,8 @@ export const RafiqAlTariqModal: React.FC<RafiqAlTariqModalProps> = ({
             type="button"
             data-f="fuel"
             aria-pressed={flt === 'fuel'}
+            aria-label="عرض رحلات تشارك الوقود"
+            title="عرض رحلات تشارك الوقود"
             onClick={() => setFlt('fuel')}
           >
             <Icon name="fuel" />
@@ -1049,6 +1095,8 @@ export const RafiqAlTariqModal: React.FC<RafiqAlTariqModalProps> = ({
             type="button"
             data-f="family"
             aria-pressed={flt === 'family'}
+            aria-label="عرض رحلات العائلات فقط"
+            title="عرض رحلات العائلات فقط"
             onClick={() => setFlt('family')}
           >
             <Icon name="users" />
@@ -1059,6 +1107,8 @@ export const RafiqAlTariqModal: React.FC<RafiqAlTariqModalProps> = ({
             type="button"
             data-f="free"
             aria-pressed={flt === 'free'}
+            aria-label="عرض الرحلات المجانية"
+            title="عرض الرحلات المجانية"
             onClick={() => setFlt('free')}
           >
             <Icon name="tag" />
@@ -1185,7 +1235,12 @@ export const RafiqAlTariqModal: React.FC<RafiqAlTariqModalProps> = ({
                       ) : null}
                       {r.phone ? (
                         <div className="contact">
-                          <a className="cbtn call" href={`tel:+213${r.phone.slice(1)}`}>
+                          <a
+                            className="cbtn call"
+                            href={`tel:+213${r.phone.slice(1)}`}
+                            aria-label="اتصال هاتفي بالسائق"
+                            title="اتصال هاتفي مباشر بالسائق"
+                          >
                             <Icon name="phone" />
                             اتصال هاتفي
                           </a>
@@ -1194,6 +1249,8 @@ export const RafiqAlTariqModal: React.FC<RafiqAlTariqModalProps> = ({
                             href={`https://wa.me/213${r.phone.slice(1)}`}
                             target="_blank"
                             rel="noopener noreferrer"
+                            aria-label="مراسلة واتساب مع السائق"
+                            title="مراسلة واتساب مباشرة مع السائق"
                           >
                             <Icon name="chat" />
                             مراسلة واتساب
@@ -1336,6 +1393,8 @@ export const RafiqAlTariqModal: React.FC<RafiqAlTariqModalProps> = ({
                         className="book"
                         type="button"
                         disabled={r.seats < 1}
+                        aria-label={r.seats < 1 ? 'الرحلة مكتملة العدد' : 'حجز مقعد في هذه الرحلة'}
+                        title={r.seats < 1 ? 'الرحلة مكتملة العدد' : 'حجز مقعد في هذه الرحلة'}
                         onClick={() => handleBook(r)}
                       >
                         {r.seats < 1 ? (

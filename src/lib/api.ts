@@ -297,7 +297,12 @@ interface BeforeInstallPromptEvent extends Event {
  * Hook for in-app PWA installation (Android, Desktop Chrome/Edge, and iOS Safari guide)
  */
 export function usePWAInstall() {
-  const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(null);
+  const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(() => {
+    if (typeof window !== 'undefined' && (window as any).__deferredPwaPrompt) {
+      return (window as any).__deferredPwaPrompt as BeforeInstallPromptEvent;
+    }
+    return null;
+  });
   const [isInstalled, setIsInstalled] = useState(false);
   const [isIOS, setIsIOS] = useState(false);
 
@@ -310,30 +315,50 @@ export function usePWAInstall() {
     const ua = window.navigator.userAgent.toLowerCase();
     setIsIOS(/iphone|ipad|ipod/.test(ua));
 
+    if ((window as any).__deferredPwaPrompt) {
+      setDeferredPrompt((window as any).__deferredPwaPrompt as BeforeInstallPromptEvent);
+    }
+
     const handleBeforeInstallPrompt = (e: Event) => {
       e.preventDefault();
+      (window as any).__deferredPwaPrompt = e;
       setDeferredPrompt(e as BeforeInstallPromptEvent);
     };
 
+    const handleGlobalPromptReady = () => {
+      if ((window as any).__deferredPwaPrompt) {
+        setDeferredPrompt((window as any).__deferredPwaPrompt as BeforeInstallPromptEvent);
+      }
+    };
+
     const handleAppInstalled = () => {
+      (window as any).__deferredPwaPrompt = null;
       setIsInstalled(true);
       setDeferredPrompt(null);
     };
 
     window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+    window.addEventListener('pwa-install-available', handleGlobalPromptReady);
     window.addEventListener('appinstalled', handleAppInstalled);
+    window.addEventListener('pwa-app-installed', handleAppInstalled);
 
     return () => {
       window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+      window.removeEventListener('pwa-install-available', handleGlobalPromptReady);
       window.removeEventListener('appinstalled', handleAppInstalled);
+      window.removeEventListener('pwa-app-installed', handleAppInstalled);
     };
   }, []);
 
   const install = async () => {
-    if (!deferredPrompt) return false;
-    await deferredPrompt.prompt();
-    const { outcome } = await deferredPrompt.userChoice;
+    const promptEvent =
+      deferredPrompt ||
+      ((typeof window !== 'undefined' ? (window as any).__deferredPwaPrompt : null) as BeforeInstallPromptEvent | null);
+    if (!promptEvent) return false;
+    await promptEvent.prompt();
+    const { outcome } = await promptEvent.userChoice;
     if (outcome === 'accepted') {
+      (window as any).__deferredPwaPrompt = null;
       setIsInstalled(true);
       setDeferredPrompt(null);
       return true;
@@ -342,7 +367,7 @@ export function usePWAInstall() {
   };
 
   return {
-    isInstallable: Boolean(deferredPrompt),
+    isInstallable: Boolean(deferredPrompt || (typeof window !== 'undefined' && (window as any).__deferredPwaPrompt)),
     isInstalled,
     isIOS,
     install,

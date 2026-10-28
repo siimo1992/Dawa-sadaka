@@ -90,7 +90,7 @@ function inspectApkFile(filePath: string): { isValid: boolean; sizeBytes: number
       return { isValid: false, sizeBytes: 0 };
     }
     const stat = fs.statSync(filePath);
-    if (!stat.isFile() || stat.size < 1024) {
+    if (!stat.isFile() || stat.size < 50 * 1024) {
       return { isValid: false, sizeBytes: stat.size };
     }
     const fd = fs.openSync(filePath, 'r');
@@ -327,79 +327,137 @@ function streamApkFileWithRange(req: Request, res: Response, filePath: string, d
   }
 }
 
-// Helper to build a valid fallback APK (ZIP archive with PK\x03\x04 header) for direct download
-export function buildDirectApkFallbackBuffer(version = '2.5.0', releaseNotes = 'Tidikelt AI Android Package'): Buffer {
-  const manifestContent = Buffer.from(
-    [
-      'Manifest-Version: 1.0',
-      'Created-By: Tidikelt AI Release Builder',
-      'Package-Name: dz.tidikelt.ai',
-      `Version-Name: ${version}`,
-      `Release-Notes: ${releaseNotes}`,
-      '',
-    ].join('\r\n'),
-    'utf-8'
-  );
-  const fileNameBuf = Buffer.from('META-INF/MANIFEST.MF', 'utf-8');
-  const extraPadding = Buffer.alloc(2048, 0x20);
+const PUBLIC_DESKTOP_SHORTCUT_PATH = path.join(PUBLIC_DOWNLOADS_DIR, 'Tidikelt-AI.url');
+const LEGACY_LIGHT_APP_PATH = path.join(PUBLIC_DOWNLOADS_DIR, 'tidikelt-ai-app.html');
 
-  // Local file header (PK\x03\x04)
-  const localHeader = Buffer.alloc(30);
-  localHeader.writeUInt32LE(0x04034b50, 0); // Signature PK\x03\x04
-  localHeader.writeUInt16LE(20, 4); // Version needed
-  localHeader.writeUInt16LE(0, 6); // Flags
-  localHeader.writeUInt16LE(0, 8); // Compression (0 = store)
-  localHeader.writeUInt16LE(0, 10); // Mod time
-  localHeader.writeUInt16LE(0, 12); // Mod date
-  localHeader.writeUInt32LE(0, 14); // CRC-32
-  const dataBuf = Buffer.concat([manifestContent, extraPadding]);
-  localHeader.writeUInt32LE(dataBuf.length, 18); // Compressed size
-  localHeader.writeUInt32LE(dataBuf.length, 22); // Uncompressed size
-  localHeader.writeUInt16LE(fileNameBuf.length, 26); // File name length
-  localHeader.writeUInt16LE(0, 28); // Extra field length
+const DEFAULT_PUBLIC_ORIGIN = 'https://ais-pre-3yvhw5ixhaot3axrf2lz5b-862365813506.europe-west2.run.app';
 
-  const localEntry = Buffer.concat([localHeader, fileNameBuf, dataBuf]);
-
-  // Central directory header (PK\x01\x02)
-  const centralHeader = Buffer.alloc(46);
-  centralHeader.writeUInt32LE(0x02014b50, 0);
-  centralHeader.writeUInt16LE(20, 4);
-  centralHeader.writeUInt16LE(20, 6);
-  centralHeader.writeUInt16LE(0, 8);
-  centralHeader.writeUInt16LE(0, 10);
-  centralHeader.writeUInt16LE(0, 12);
-  centralHeader.writeUInt16LE(0, 14);
-  centralHeader.writeUInt32LE(0, 16);
-  centralHeader.writeUInt32LE(dataBuf.length, 20);
-  centralHeader.writeUInt32LE(dataBuf.length, 24);
-  centralHeader.writeUInt16LE(fileNameBuf.length, 28);
-  centralHeader.writeUInt16LE(0, 30);
-  centralHeader.writeUInt16LE(0, 32);
-  centralHeader.writeUInt16LE(0, 34);
-  centralHeader.writeUInt16LE(0, 36);
-  centralHeader.writeUInt32LE(0, 38);
-  centralHeader.writeUInt32LE(0, 42);
-
-  const centralEntry = Buffer.concat([centralHeader, fileNameBuf]);
-
-  // End of central directory record (PK\x05\x06)
-  const eocd = Buffer.alloc(22);
-  eocd.writeUInt32LE(0x06054b50, 0);
-  eocd.writeUInt16LE(0, 4);
-  eocd.writeUInt16LE(0, 6);
-  eocd.writeUInt16LE(1, 8);
-  eocd.writeUInt16LE(1, 10);
-  eocd.writeUInt32LE(centralEntry.length, 12);
-  eocd.writeUInt32LE(localEntry.length, 16);
-  eocd.writeUInt16LE(0, 20);
-
-  return Buffer.concat([localEntry, centralEntry, eocd]);
+/**
+ * Generates a standard Desktop Shortcut (.url) file for Windows / Desktop browsers
+ * that opens the FULL Tidikelt AI platform directly with 1 click.
+ */
+export function buildDesktopShortcutFileContent(originUrl = ''): string {
+  const safeOrigin = (originUrl || DEFAULT_PUBLIC_ORIGIN).replace(/\/+$/, '');
+  const fullAppUrl = `${safeOrigin}/?install=1`;
+  const iconUrl = `${safeOrigin}/icon-512.png`;
+  return [
+    '[InternetShortcut]',
+    `URL=${fullAppUrl}`,
+    `IconFile=${iconUrl}`,
+    'IconIndex=0',
+    'HotKey=0',
+    'IDList=',
+    '',
+  ].join('\r\n');
 }
 
 /**
- * Periodic self-healing verifier for APK download readiness.
- * Cleans up any corrupted (<1KB or invalid header) files and ensures a valid binary APK
- * is always ready to be served immediately upon clicking the download button.
+ * Generates a 1-click direct launcher & Home Screen installer for the FULL Tidikelt AI application
+ * (NOT a mini or lightweight app). Automatically redirects to the full application in Chrome / system browser
+ * with ?install=1 so the full app is installed directly onto the Home Screen or Desktop.
+ */
+export function buildDirectFullAppLauncherHtml(originUrl = '', version = '2.5.0'): string {
+  const safeOrigin = (originUrl || DEFAULT_PUBLIC_ORIGIN).replace(/\/+$/, '');
+  const installTargetUrl = `${safeOrigin}/?install=1`;
+  const hostNoProto = safeOrigin.replace(/^https?:\/\//, '');
+  const chromeIntentUrl = `intent://${hostNoProto}/?install=1#Intent;scheme=https;package=com.android.chrome;S.browser_fallback_url=${encodeURIComponent(installTargetUrl)};end`;
+
+  return `<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta http-equiv="refresh" content="0;url=${installTargetUrl}" />
+  <meta name="theme-color" content="#065f46" />
+  <title>تيديكلت AI — مشغل وتثبيت التطبيق الكامل</title>
+  <link rel="icon" type="image/png" href="${safeOrigin}/icon-192.png" />
+  <link rel="apple-touch-icon" href="${safeOrigin}/apple-touch-icon.png" />
+  <style>
+    * { box-sizing: border-box; font-family: system-ui, -apple-system, 'Cairo', sans-serif; }
+    body {
+      margin: 0;
+      min-height: 100dvh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #071115;
+      color: #f8fafc;
+      padding: 20px;
+      text-align: center;
+    }
+    .card {
+      max-width: 420px;
+      width: 100%;
+      background: #101c22;
+      border: 1px solid rgba(16, 185, 129, 0.35);
+      border-radius: 24px;
+      padding: 28px 22px;
+      box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5);
+    }
+    .icon {
+      width: 72px;
+      height: 72px;
+      border-radius: 20px;
+      margin: 0 auto 16px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: linear-gradient(135deg, #059669, #047857);
+      font-size: 32px;
+      font-weight: 900;
+      color: #fff;
+      box-shadow: 0 8px 24px rgba(5, 150, 105, 0.4);
+    }
+    h1 { margin: 0 0 8px; font-size: 20px; font-weight: 800; }
+    p { margin: 0 0 20px; font-size: 13px; color: #94a3b8; line-height: 1.65; }
+    .btn {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 100%;
+      padding: 14px 18px;
+      border-radius: 14px;
+      background: #059669;
+      color: #ffffff;
+      font-size: 15px;
+      font-weight: 800;
+      text-decoration: none;
+      box-shadow: 0 6px 18px rgba(5, 150, 105, 0.35);
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="icon">ت</div>
+    <h1>تيديكلت AI (v${version})</h1>
+    <p>جاري فتح وتثبيت التطبيق الكامل مباشرة على جهازك...</p>
+    <a id="launchFullAppBtn" href="${installTargetUrl}" class="btn">
+      فتح وتثبيت التطبيق الكامل الآن
+    </a>
+  </div>
+  <script>
+    (function() {
+      var ua = navigator.userAgent.toLowerCase();
+      var isAndroid = ua.indexOf('android') > -1;
+      var targetUrl = ${JSON.stringify(installTargetUrl)};
+      var intentUrl = ${JSON.stringify(chromeIntentUrl)};
+      var btn = document.getElementById('launchFullAppBtn');
+      if (isAndroid && (location.protocol === 'file:' || location.protocol === 'content:')) {
+        if (btn) btn.href = intentUrl;
+        window.location.replace(intentUrl);
+      } else {
+        window.location.replace(targetUrl);
+      }
+    })();
+  </script>
+</body>
+</html>`;
+}
+
+/**
+ * Periodic self-healing verifier for APK & Direct Desktop/Home-Screen Shortcut readiness.
+ * Cleans up any corrupted (<50KB or invalid header) APK files and legacy mini-app files,
+ * and ensures the direct desktop shortcut is always ready on disk.
  */
 export function verifyAndRepairApkRelease(): {
   ok: boolean;
@@ -412,7 +470,7 @@ export function verifyAndRepairApkRelease(): {
   ensureDirectories();
   let repaired = false;
 
-  // Clean up any corrupted files on disk
+  // Clean up any corrupted or dummy (<50KB) APK files on disk so Android never shows "Package Parse Error"
   for (const candidate of [PUBLIC_APK_PATH, UPLOADED_APK_PATH]) {
     try {
       if (fs.existsSync(candidate)) {
@@ -425,32 +483,44 @@ export function verifyAndRepairApkRelease(): {
     } catch {}
   }
 
-  const config = loadApkConfig();
-  let activeFile = getActiveApkFilePath();
-
-  // If no valid APK file is on disk at all, materialize a valid fallback APK in PUBLIC_APK_PATH
-  // so static/range/direct download requests always succeed without delay
-  if (!activeFile.isValid) {
-    try {
-      const fallbackBuf = buildDirectApkFallbackBuffer(config.version, config.releaseNotes);
-      fs.writeFileSync(PUBLIC_APK_PATH, fallbackBuf);
-      activeFile = getActiveApkFilePath();
+  // Remove legacy lightweight mini-app file if present
+  try {
+    if (fs.existsSync(LEGACY_LIGHT_APP_PATH)) {
+      fs.unlinkSync(LEGACY_LIGHT_APP_PATH);
       repaired = true;
-    } catch {}
-  }
+    }
+  } catch {}
+
+  const config = loadApkConfig();
+  const activeFile = getActiveApkFilePath();
+
+  // Always ensure the direct Desktop Shortcut (.url) exists in public/downloads/Tidikelt-AI.url
+  try {
+    const shortcutContent = buildDesktopShortcutFileContent('');
+    if (!fs.existsSync(PUBLIC_DESKTOP_SHORTCUT_PATH)) {
+      fs.writeFileSync(PUBLIC_DESKTOP_SHORTCUT_PATH, shortcutContent, 'utf-8');
+      repaired = true;
+    }
+  } catch {}
 
   return {
-    ok: activeFile.isValid || Boolean(config.normalizedDownloadUrl),
+    ok: true,
     repaired,
     mode: config.mode,
-    fileName: config.fileName || 'tidikelt-ai-release.apk',
-    fileSizeLabel: config.fileSizeLabel || '18.4 MB',
+    fileName: activeFile.isValid ? config.fileName || 'tidikelt-ai-release.apk' : 'Tidikelt-AI.url',
+    fileSizeLabel: activeFile.isValid ? config.fileSizeLabel || '18.4 MB' : 'تثبيت مباشر للتطبيق الكامل',
     hasValidBinaryOnDisk: activeFile.isValid,
   };
 }
 
 export function registerApkReleaseRoutes(app: Express) {
   verifyAndRepairApkRelease();
+
+  const resolveOriginUrl = (req: Request): string => {
+    const proto = (req.headers['x-forwarded-proto'] as string) || req.protocol || 'https';
+    const host = req.headers['x-forwarded-host'] || req.headers.host || '';
+    return host ? `${proto}://${host}` : DEFAULT_PUBLIC_ORIGIN;
+  };
 
   // 1. Get current APK release configuration & status
   app.get('/api/apk/info', (_req: Request, res: Response) => {
@@ -507,7 +577,6 @@ export function registerApkReleaseRoutes(app: Express) {
         lastResetAt: now,
       });
 
-      // Immediately materialize a valid fallback binary so direct downloads continue working
       verifyAndRepairApkRelease();
 
       res.setHeader('Cache-Control', 'no-store');
@@ -605,17 +674,56 @@ export function registerApkReleaseRoutes(app: Express) {
     }
   );
 
-  // 5. Unified APK download handler (supports both /api/apk/download and /downloads/tidikelt-ai-release.apk)
+  // 5. Direct PC Desktop Shortcut endpoint (.url file that opens the FULL app in 1 click on Windows/PC)
+  const handleDesktopShortcutDownload = (req: Request, res: Response) => {
+    const ua = (req.headers['user-agent'] || '').toLowerCase();
+    const isMobile = /android|iphone|ipad|ipod|mobile/i.test(ua);
+
+    // Mobile phones (Android/iOS) cannot open .url files and show "يتعذر فتح الملف".
+    // Redirect mobile devices directly to the full application with ?install=1
+    if (isMobile) {
+      return res.redirect(302, '/?install=1');
+    }
+
+    const originUrl = resolveOriginUrl(req);
+    const shortcutPayload = Buffer.from(buildDesktopShortcutFileContent(originUrl), 'utf-8');
+
+    res.setHeader('Content-Type', 'application/internet-shortcut; charset=utf-8');
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="Tidikelt-AI.url"; filename*=UTF-8''%D8%AA%D9%8A%D8%AF%D9%8A%D9%83%D9%84%D8%AA-AI.url`
+    );
+    res.setHeader('Content-Length', String(shortcutPayload.length));
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    return res.status(200).send(shortcutPayload);
+  };
+
+  app.get('/api/apk/desktop-shortcut', handleDesktopShortcutDownload);
+  app.get('/downloads/Tidikelt-AI.url', handleDesktopShortcutDownload);
+
+  // 6. Unified Full-App Download / Shortcut / APK handler
   const handleApkDownload = (req: Request, res: Response) => {
     const config = loadApkConfig();
     const forceLocal = req.query.source === 'local';
+    const format = typeof req.query.format === 'string' ? req.query.format : '';
+
+    const ua = (req.headers['user-agent'] || '').toLowerCase();
+    const isMobile = /android|iphone|ipad|ipod|mobile/i.test(ua);
+
+    if (format === 'shortcut' || format === 'url') {
+      if (isMobile) {
+        return res.redirect(302, '/?install=1');
+      }
+      return handleDesktopShortcutDownload(req, res);
+    }
 
     // Priority 1: If mode is external_url and a valid URL is configured
     if (!forceLocal && config.mode === 'external_url' && config.normalizedDownloadUrl) {
       return res.redirect(302, config.normalizedDownloadUrl);
     }
 
-    // Priority 2: If a valid APK file exists on disk, stream it with full headers & byte ranges
+    // Priority 2: If a valid binary APK file exists on disk, stream it with full headers & byte ranges
     const activeFile = getActiveApkFilePath();
     if (activeFile.isValid && activeFile.path) {
       return streamApkFileWithRange(req, res, activeFile.path, config.fileName || 'tidikelt-ai-release.apk');
@@ -626,17 +734,24 @@ export function registerApkReleaseRoutes(app: Express) {
       return res.redirect(302, config.normalizedDownloadUrl);
     }
 
-    // Priority 4: Direct file download fallback so clicking the download button always downloads immediately
-    const safeFileName = (config.fileName || 'tidikelt-ai-release.apk').replace(/[^a-zA-Z0-9._-]/g, '_');
-    const fallbackBuffer = buildDirectApkFallbackBuffer(config.version, config.releaseNotes);
-    res.setHeader('Content-Type', 'application/vnd.android.package-archive');
-    res.setHeader('Content-Disposition', `attachment; filename="${safeFileName}"`);
-    res.setHeader('Content-Length', String(fallbackBuffer.length));
-    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
-    res.setHeader('X-Content-Type-Options', 'nosniff');
-    return res.status(200).send(fallbackBuffer);
+    // Priority 4: If accessed from a Desktop computer (PC / Mac), download the 1-click Desktop Shortcut
+    if (!isMobile && format !== 'launcher') {
+      return handleDesktopShortcutDownload(req, res);
+    }
+
+    // Priority 5: On Mobile devices when no custom APK is uploaded:
+    // CRITICAL: DO NOT serve an attachment file that drops into Downloads and produces "يتعذر فتح الملف".
+    // Redirect directly (302) to the full web application with ?install=1 so Chrome / browser
+    // natively prompts the user to install the genuine application to the Home Screen!
+    return res.redirect(302, '/?install=1');
   };
 
   app.get('/api/apk/download', handleApkDownload);
   app.get('/downloads/tidikelt-ai-release.apk', handleApkDownload);
+  app.get('/downloads/tidikelt-ai-app.html', (_req: Request, res: Response) => {
+    return res.redirect(302, '/?install=1');
+  });
+  app.get('/install', (_req: Request, res: Response) => {
+    return res.redirect(302, '/?install=1');
+  });
 }

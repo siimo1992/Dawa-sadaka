@@ -37,6 +37,12 @@ import {
   deleteGoogleTask,
   type GoogleTaskItem,
 } from '../services/googleTasksService.ts';
+import {
+  loadStoredOasisPlaces,
+  saveStoredOasisPlaces,
+  loadStoredCommunityTasks,
+  saveStoredCommunityTasks,
+} from '../utils/ownerControlStore';
 
 export interface OasisPlace {
   id: number;
@@ -84,7 +90,7 @@ export const OasisMapAndTasksPage: React.FC<OasisMapAndTasksPageProps> = ({ fire
   );
 
   // Map state
-  const [places, setPlaces] = useState<OasisPlace[]>([]);
+  const [places, setPlaces] = useState<OasisPlace[]>(loadStoredOasisPlaces);
   const [selectedPlace, setSelectedPlace] = useState<OasisPlace | null>(null);
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState('');
@@ -94,7 +100,7 @@ export const OasisMapAndTasksPage: React.FC<OasisMapAndTasksPageProps> = ({ fire
 
   // Tasks state (Google Tasks + Cloud SQL)
   const [activeTab, setActiveTab] = useState<'map' | 'tasks'>('map');
-  const [tasks, setTasks] = useState<CloudSqlTask[]>([]);
+  const [tasks, setTasks] = useState<CloudSqlTask[]>(loadStoredCommunityTasks);
   const [googleTasks, setGoogleTasks] = useState<GoogleTaskItem[]>([]);
   const [isTasksLoading, setIsTasksLoading] = useState(false);
   const [tasksError, setTasksError] = useState<string | null>(null);
@@ -124,30 +130,55 @@ export const OasisMapAndTasksPage: React.FC<OasisMapAndTasksPageProps> = ({ fire
       .catch((err) => console.warn('Could not fetch maps config:', err));
   }, []);
 
-  // Load places from Cloud SQL
+  // Load places from Cloud SQL or Owner Store
   const loadPlaces = useCallback(async () => {
+    const hasOwnerOverride = localStorage.getItem('tidikelt_oasis_places_v1');
+    if (hasOwnerOverride) {
+      setPlaces(loadStoredOasisPlaces());
+      return;
+    }
     try {
       const res = await fetch('/api/oasis-places');
       const data = await res.json();
-      if (data.success && Array.isArray(data.places)) {
+      if (data.success && Array.isArray(data.places) && data.places.length > 0) {
         setPlaces(data.places);
+        saveStoredOasisPlaces(data.places);
       }
     } catch (err) {
       console.warn('Failed to load places from Cloud SQL:', err);
     }
   }, []);
 
-  // Load Cloud SQL community tasks
+  // Load Cloud SQL community tasks or Owner Store
   const loadCloudSqlTasks = useCallback(async () => {
+    const hasOwnerOverride = localStorage.getItem('tidikelt_community_tasks_v1');
+    if (hasOwnerOverride) {
+      setTasks(loadStoredCommunityTasks());
+      return;
+    }
     try {
       const res = await fetch('/api/community-tasks');
       const data = await res.json();
       if (data.success && Array.isArray(data.tasks)) {
         setTasks(data.tasks);
+        saveStoredCommunityTasks(data.tasks);
       }
     } catch (err) {
       console.warn('Failed to load Cloud SQL tasks:', err);
     }
+  }, []);
+
+  useEffect(() => {
+    const handleOwnerSync = () => {
+      setPlaces(loadStoredOasisPlaces());
+      setTasks(loadStoredCommunityTasks());
+    };
+    window.addEventListener('tidikelt-owner-sync', handleOwnerSync);
+    window.addEventListener('storage', handleOwnerSync);
+    return () => {
+      window.removeEventListener('tidikelt-owner-sync', handleOwnerSync);
+      window.removeEventListener('storage', handleOwnerSync);
+    };
   }, []);
 
   // Load Google Tasks

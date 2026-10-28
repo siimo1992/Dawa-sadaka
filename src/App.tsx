@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, Suspense, lazy } from 'react';
 import {
   Volume2,
   VolumeX,
@@ -70,10 +70,11 @@ import {
   Compass,
   ListTodo,
   Car,
+  HeartHandshake,
+  Ban,
+  Bot,
+  Building2,
 } from 'lucide-react';
-import { EmergencyMap } from './components/EmergencyMap';
-import { WeatherForecastChart } from './components/WeatherForecastChart';
-import { AgentAnalytics30DayChart } from './components/AgentAnalytics30DayChart';
 import {
   InAppNotificationToastContainer,
   AppNotification,
@@ -92,9 +93,6 @@ import {
   VisitorLocationState,
   findNearestWilaya,
 } from './utils/geoLocations';
-import { LocationSelectorModal } from './components/LocationSelectorModal';
-import { TrainingAndRagStudioModal } from './components/TrainingAndRagStudioModal';
-import { ApiExplorerModal } from './components/ApiExplorerModal';
 import { SosButton } from './components/SosButton';
 import { TodayCard } from './components/TodayCard';
 import SearchActivity, { SearchActivityPhase } from './components/SearchActivity';
@@ -104,12 +102,48 @@ import { readSSE } from './services/sse-reader';
 import { usePWAInstall, useOnlineStatus } from './lib/api';
 import { Mode, detectMode, askTidikelt } from './services/tidikelt-agent';
 import type { PipelineExecution, ChatSession } from './types';
-import { TidikeltOasis3DModal } from './components/TidikeltOasis3DModal';
-import { VeoAndMapsStudioModal } from './components/VeoAndMapsStudioModal';
 import { CommunityNewsPage } from './components/CommunityNewsPage';
-import { OasisMapAndTasksPage } from './components/OasisMapAndTasksPage.tsx';
-import { DownloadAppModal } from './components/DownloadAppModal';
 import { RafiqAlTariqModal } from './components/RafiqAlTariqModal';
+
+const AgentAnalytics30DayChart = lazy(() =>
+  import('./components/AgentAnalytics30DayChart').then((m) => ({ default: m.AgentAnalytics30DayChart }))
+);
+const LocationSelectorModal = lazy(() =>
+  import('./components/LocationSelectorModal').then((m) => ({ default: m.LocationSelectorModal }))
+);
+const TrainingAndRagStudioModal = lazy(() =>
+  import('./components/TrainingAndRagStudioModal').then((m) => ({ default: m.TrainingAndRagStudioModal }))
+);
+const ApiExplorerModal = lazy(() =>
+  import('./components/ApiExplorerModal').then((m) => ({ default: m.ApiExplorerModal }))
+);
+const TidikeltOasis3DModal = lazy(() =>
+  import('./components/TidikeltOasis3DModal').then((m) => ({ default: m.TidikeltOasis3DModal }))
+);
+const VeoAndMapsStudioModal = lazy(() =>
+  import('./components/VeoAndMapsStudioModal').then((m) => ({ default: m.VeoAndMapsStudioModal }))
+);
+const OasisMapAndTasksPage = lazy(() =>
+  import('./components/OasisMapAndTasksPage.tsx').then((m) => ({ default: m.OasisMapAndTasksPage }))
+);
+const DownloadAppModal = lazy(() =>
+  import('./components/DownloadAppModal').then((m) => ({ default: m.DownloadAppModal }))
+);
+import MyCharitySection from './MyCharitySection';
+import { CharityAdminApprovalBox } from './components/CharityAdminApprovalBox';
+import {
+  OwnerServiceControlSections,
+  OwnerDepartmentSection,
+} from './components/OwnerServiceControlSections';
+import {
+  addBanEntry,
+  removeBanEntry,
+  isTargetBanned,
+  loadBanList,
+  loadDesertTrips,
+  saveDesertTrips,
+  loadDesertChecklist,
+} from './utils/ownerControlStore';
 import {
   signInWithGooglePopup,
   signOutUser,
@@ -122,7 +156,9 @@ import {
   subscribeToCloudSavedNews,
 } from './services/firebaseService';
 import type { User as FirebaseUser } from 'firebase/auth';
-import { LongTermMemoryModal } from './components/LongTermMemoryModal';
+const LongTermMemoryModal = lazy(() =>
+  import('./components/LongTermMemoryModal').then((m) => ({ default: m.LongTermMemoryModal }))
+);
 import {
   GeneratedFileCard,
   ConvertMessageToFileMenu,
@@ -136,7 +172,9 @@ import {
   type PriceListPosterData,
   type PdfExportSettings,
 } from './components/PriceListPosterCard';
-import { LiveVoiceCallModal } from './components/LiveVoiceCallModal';
+const LiveVoiceCallModal = lazy(() =>
+  import('./components/LiveVoiceCallModal').then((m) => ({ default: m.LiveVoiceCallModal }))
+);
 
 interface Agent {
   id: string;
@@ -403,7 +441,6 @@ const NEWS_CATEGORIES: NewsCategoryDef[] = [
   { id: 'health', name: 'صحة واستعجالات', emoji: '🩺', badgeClass: 'bg-rose-500/15 text-rose-700 dark:text-rose-300 border-rose-500/30' },
   { id: 'services', name: 'خدمات وإدارة', emoji: '🏛️', badgeClass: 'bg-blue-500/15 text-blue-700 dark:text-blue-300 border-blue-500/30' },
   { id: 'education', name: 'تعليم وجامعة', emoji: '🎓', badgeClass: 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-500/30' },
-  { id: 'weather', name: 'طقس وبيئة', emoji: '🌤️', badgeClass: 'bg-sky-500/15 text-sky-700 dark:text-sky-300 border-sky-500/30' },
   { id: 'market', name: 'أسواق وتمور', emoji: '🛒', badgeClass: 'bg-orange-500/15 text-orange-700 dark:text-orange-300 border-orange-500/30' },
   { id: 'heritage', name: 'تراث وثقافة', emoji: '🏺', badgeClass: 'bg-teal-500/15 text-teal-700 dark:text-teal-300 border-teal-500/30' },
   { id: 'sports', name: 'رياضة', emoji: '⚽', badgeClass: 'bg-lime-500/15 text-lime-700 dark:text-lime-300 border-lime-500/30' },
@@ -870,7 +907,7 @@ interface AgentAvatarImageProps {
   fallback: string;
 }
 
-const AgentAvatarImage: React.FC<AgentAvatarImageProps> = ({
+const AgentAvatarImage: React.FC<AgentAvatarImageProps> = React.memo(({
   src,
   alt,
   sizeClass,
@@ -907,6 +944,8 @@ const AgentAvatarImage: React.FC<AgentAvatarImageProps> = ({
         key={src}
         src={src}
         alt={alt}
+        loading="lazy"
+        decoding="async"
         onLoad={() => setIsLoaded(true)}
         onError={() => setHasError(true)}
         className={`${sizeClass} ${roundedClass} object-cover shrink-0 shadow-2xs border border-black/10 dark:border-white/15 transition-all duration-500 ease-out transform ${
@@ -915,7 +954,7 @@ const AgentAvatarImage: React.FC<AgentAvatarImageProps> = ({
       />
     </div>
   );
-};
+});
 
 export default function App() {
   const [lang, setLang] = useState<Language>(() => {
@@ -932,7 +971,7 @@ export default function App() {
     document.title = t.appName;
   }, [lang, t.appName]);
 
-  const [view, setView] = useState<'chat' | 'news' | 'desert' | 'code_history' | 'admin' | 'maps_tasks' | 'rides'>('chat');
+  const [view, setView] = useState<'chat' | 'news' | 'desert' | 'code_history' | 'admin' | 'maps_tasks' | 'rides' | 'charity'>('chat');
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
     return (localStorage.getItem('ain_salah_theme') as 'light' | 'dark') || 'light';
   });
@@ -967,6 +1006,118 @@ export default function App() {
   const { isInstallable, isInstalled, isIOS, install: installPWA } = usePWAInstall();
   const isOnline = useOnlineStatus();
   const [showIOSInstallGuide, setShowIOSInstallGuide] = useState(false);
+  const [showDirectInstallBanner, setShowDirectInstallBanner] = useState<boolean>(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      return params.get('install') === '1';
+    }
+    return false;
+  });
+
+  const triggerSilentShortcutDownload = (urlPath: string, suggestedName: string) => {
+    try {
+      const link = document.createElement('a');
+      link.href = urlPath;
+      link.download = suggestedName;
+      link.style.display = 'none';
+      document.body.appendChild(link);
+      link.click();
+      setTimeout(() => {
+        try {
+          document.body.removeChild(link);
+        } catch {}
+      }, 300);
+    } catch {}
+  };
+
+  // When clicking "تنزيل التطبيق" (#openDownload):
+  // Installs the FULL Tidikelt AI application directly onto the phone Home Screen or PC Desktop.
+  // Mobile devices use native browser WebAPK / Home-Screen install without downloading unopenable files (eliminating "يتعذر فتح الملف").
+  // PC / Desktop users automatically get the 1-click Desktop shortcut (.url).
+  const handleDirectBrowserOrLightDownload = async (e?: React.MouseEvent<HTMLElement>) => {
+    if (e) {
+      e.preventDefault();
+    }
+
+    const ua = typeof navigator !== 'undefined' ? navigator.userAgent.toLowerCase() : '';
+    const isAndroid = /android/i.test(ua);
+    const isMobileDevice = /android|iphone|ipad|ipod|mobile/i.test(ua);
+    const isInIframe = typeof window !== 'undefined' && window.self !== window.top;
+
+    // 1) If native browser installation (Chrome/Edge/Samsung beforeinstallprompt) is ready right now,
+    // immediately open the OS native "Install App" dialog for the FULL application!
+    if (isInstallable) {
+      const accepted = await installPWA();
+      if (!isMobileDevice) {
+        // Also download the PC Desktop Shortcut (.url) automatically on computers
+        triggerSilentShortcutDownload('/api/apk/desktop-shortcut', 'Tidikelt-AI.url');
+      }
+      if (accepted) {
+        setShowDirectInstallBanner(false);
+        pushInAppNotification({
+          type: 'system',
+          title: lang === 'ar' ? 'تم تثبيت التطبيق الكامل بنجاح' : 'Full App Installed',
+          message:
+            lang === 'ar'
+              ? 'تم تثبيت تطبيق تيديكلت AI الكامل مباشرة على شاشتك الرئيسية بنجاح.'
+              : 'The full Tidikelt AI app has been installed directly onto your device.',
+        });
+        return;
+      }
+    }
+
+    // 2) On iOS (iPhone / iPad): show the direct Home Screen install guide
+    if (isIOS) {
+      setShowIOSInstallGuide(true);
+      setIsDownloadModalOpen(true);
+      return;
+    }
+
+    // 3) On PC / Desktop: automatically download the 1-click Desktop Shortcut (Tidikelt-AI.url)
+    if (!isMobileDevice) {
+      triggerSilentShortcutDownload('/api/apk/desktop-shortcut', 'Tidikelt-AI.url');
+      setShowDirectInstallBanner(true);
+      pushInAppNotification({
+        type: 'system',
+        title: lang === 'ar' ? 'تم تنزيل اختصار سطح المكتب للتطبيق الكامل' : 'Desktop Shortcut Downloaded',
+        message:
+          lang === 'ar'
+            ? 'تم تنزيل اختصار سطح المكتب (Tidikelt-AI.url) لتشغيل التطبيق الكامل بنقرة واحدة على حاسوبك.'
+            : 'Downloaded Tidikelt-AI.url shortcut to launch the full app directly from your Desktop.',
+      });
+      return;
+    }
+
+    // 4) On Android / Mobile:
+    // CRITICAL: NEVER download .url or .html files on mobile! That causes Android to display "يتعذر فتح الملف".
+    // Instead: redirect to Chrome intent if embedded, and open the guided install modal.
+    if (isAndroid && isInIframe) {
+      const cleanHost = window.location.host;
+      const fallbackUrl = `${window.location.origin}/?install=1`;
+      const intentUrl = `intent://${cleanHost}/?install=1#Intent;scheme=https;package=com.android.chrome;S.browser_fallback_url=${encodeURIComponent(fallbackUrl)};end`;
+      try {
+        if (window.top) {
+          window.top.location.href = intentUrl;
+        } else {
+          window.location.href = intentUrl;
+        }
+      } catch {
+        window.location.href = fallbackUrl;
+      }
+    }
+
+    setShowDirectInstallBanner(true);
+    setIsDownloadModalOpen(true);
+
+    pushInAppNotification({
+      type: 'system',
+      title: lang === 'ar' ? 'تثبيت تيديكلت AI على شاشة الهاتف' : 'Install Tidikelt AI to Home Screen',
+      message:
+        lang === 'ar'
+          ? 'اختر «تثبيت التطبيق» أو «إضافة إلى الشاشة الرئيسية» من قائمة المتصفح (⋮) للتثبيت المباشر دون تنزيل أي ملفات معطوبة.'
+          : 'Tap the browser menu (⋮) and select "Install app" or "Add to Home screen" for instant installation.',
+    });
+  };
 
   // Sync mobile visualViewport height with RAF throttling so virtual keyboards never cause scroll jank
   useEffect(() => {
@@ -1472,7 +1623,20 @@ export default function App() {
   const [pinError, setPinError] = useState(false);
   const [pinErrorMessage, setPinErrorMessage] = useState('');
   const [logoClickCount, setLogoClickCount] = useState(0);
-  const [adminTab, setAdminTab] = useState<'news' | 'weather' | 'analytics' | 'ratings' | 'pin' | 'settings'>('news');
+  const [adminTab, setAdminTab] = useState<
+    | 'news'
+    | 'charity'
+    | 'rides'
+    | 'maps_tasks'
+    | 'desert'
+    | 'agents'
+    | 'bans'
+    | 'weather'
+    | 'analytics'
+    | 'ratings'
+    | 'pin'
+    | 'settings'
+  >('news');
   const [adminNewsStatusFilter, setAdminNewsStatusFilter] = useState<'all' | 'pending' | 'approved' | 'rejected'>('pending');
   const [isAddingAdminNews, setIsAddingAdminNews] = useState(false);
   const [adminNewSource, setAdminNewSource] = useState('');
@@ -1734,40 +1898,22 @@ export default function App() {
     }
   };
 
-  // Urgent Weather Alert State
+  // Weather Alert State (permanently disabled as requested)
   const [weatherAlert, setWeatherAlert] = useState<WeatherAlert>(() => {
-    const now = Date.now();
     try {
-      const saved = localStorage.getItem('ain_salah_weather_alert');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        // Check if saved alert is already expired
-        if (parsed.expiresAt && now > parsed.expiresAt) {
-          return {
-            ...parsed,
-            active: false,
-            dataType: 'outdated',
-          };
-        }
-        return parsed;
-      }
+      localStorage.removeItem('ain_salah_weather_alert');
     } catch {}
     return {
-      active: true,
-      title: 'تنبيه جوي عاجل: رياح رملية قوية (عجاج) على الطريق الوطني رقم 1',
-      message:
-        'هبوب رياح رملية قوية مع انعدام شبه تام للرؤية الأفقية على محوري عين صالح - تمنراست وعين صالح - أدرار. يُرجى توخي أقصى درجات الحيطة أو تأجيل السفر غير الضروري.',
-      severity: 'warning',
-      timestamp: now,
-      source: 'الديوان الوطني للأرصاد الجوية (ONM) / خلية اليقظة لولاية عين صالح',
-      dataType: 'live',
-      publishedAt: now - 3600 * 1000 * 2,
-      updatedAt: now - 1800 * 1000,
-      expiresAt: now + 3600 * 1000 * 6,
-      expireDurationHours: 6,
+      active: false,
+      title: '',
+      message: '',
+      severity: 'info',
+      timestamp: Date.now(),
+      source: '',
+      dataType: 'outdated',
     };
   });
-  const [isAlertDismissed, setIsAlertDismissed] = useState(false);
+  const [isAlertDismissed, setIsAlertDismissed] = useState(true);
 
   // Weather Alert Editing Form State
   const [editAlertActive, setEditAlertActive] = useState(weatherAlert.active);
@@ -1796,22 +1942,6 @@ export default function App() {
 
   // Sending progress timer
   const [sendSecondsElapsed, setSendSecondsElapsed] = useState(0);
-
-  // Auto-expire weather alert if time passed
-  useEffect(() => {
-    const checkExpiration = () => {
-      if (weatherAlert.active && weatherAlert.expiresAt && Date.now() > weatherAlert.expiresAt) {
-        setWeatherAlert((prev) => ({
-          ...prev,
-          active: false,
-          dataType: 'outdated',
-        }));
-      }
-    };
-    checkExpiration();
-    const interval = setInterval(checkExpiration, 30000);
-    return () => clearInterval(interval);
-  }, [weatherAlert]);
 
   // News State
   const [news, setNews] = useState<NewsItem[]>(() => {
@@ -1893,7 +2023,12 @@ export default function App() {
   const [notificationHistory, setNotificationHistory] = useState<AppNotification[]>(() => {
     try {
       const saved = localStorage.getItem('ain_salah_notifications_history');
-      return saved ? JSON.parse(saved) : [];
+      if (!saved) return [];
+      const parsed = JSON.parse(saved);
+      if (!Array.isArray(parsed)) return [];
+      return parsed.filter(
+        (n: any) => n && n.type !== 'weather' && n.type !== 'comprehensive_brief'
+      );
     } catch {
       return [];
     }
@@ -1915,29 +2050,18 @@ export default function App() {
   const allNotificationsList = useMemo(() => {
     const list: AppNotification[] = [];
 
-    // 1. Weather alert if active
-    if (weatherAlert.active && !isAlertDismissed) {
-      list.push({
-        id: `weather-live-${weatherAlert.timestamp || 'active'}`,
-        type: 'weather',
-        title: weatherAlert.title,
-        message: weatherAlert.message,
-        source: weatherAlert.source || 'الديوان الوطني للأرصاد الجوية',
-        severity: weatherAlert.severity,
-        timestamp: weatherAlert.timestamp || Date.now(),
-        actionLabel: 'تفاصيل التنبيه في الأخبار',
-        onAction: () => setView('news'),
-      });
-    }
-
-    // 2. Notification history items
+    // Notification history items (excluding weather & comprehensive brief)
     notificationHistory.forEach((n) => {
-      if (!list.some((existing) => existing.id === n.id)) {
+      if (
+        n.type !== 'weather' &&
+        n.type !== 'comprehensive_brief' &&
+        !list.some((existing) => existing.id === n.id)
+      ) {
         list.push(n);
       }
     });
 
-    // 3. Fallback approved verified news if empty
+    // Fallback approved verified news if empty
     if (list.length === 0) {
       const approved = news.filter((item) => item.status === 'approved').slice(0, 3);
       approved.forEach((item) => {
@@ -1958,7 +2082,7 @@ export default function App() {
     }
 
     return list.sort((a, b) => b.timestamp - a.timestamp);
-  }, [weatherAlert, isAlertDismissed, notificationHistory, news]);
+  }, [notificationHistory, news]);
 
   const unreadNotifs = useMemo(() => {
     const readSet = new Set(readNotifIds);
@@ -2358,25 +2482,28 @@ export default function App() {
   // Always start with an empty message list (New Chat) upon entering or refreshing the app
   const [messages, setMessages] = useState<Message[]>(() => []);
 
-  // Automatically sync active conversation to Firestore when signed in
+  // Automatically sync active conversation to Firestore when signed in (debounced to avoid streaming lag)
   useEffect(() => {
     if (!firebaseUser || messages.length === 0 || !activeSessionId) return;
-    const firstUserMsg = messages.find((m) => m.role === 'me');
-    const lastUserMsg = [...messages].reverse().find((m) => m.role === 'me');
-    const lastBotMsg = [...messages].reverse().find((m) => m.role === 'bot');
-    const lastMsg = messages[messages.length - 1];
-    const title = firstUserMsg ? deriveSessionTitle(firstUserMsg.text) : 'محادثة جديدة';
-    const preview = lastMsg?.text ? lastMsg.text.slice(0, 160) : '';
+    const timer = window.setTimeout(() => {
+      const firstUserMsg = messages.find((m) => m.role === 'me');
+      const lastUserMsg = [...messages].reverse().find((m) => m.role === 'me');
+      const lastBotMsg = [...messages].reverse().find((m) => m.role === 'bot');
+      const lastMsg = messages[messages.length - 1];
+      const title = firstUserMsg ? deriveSessionTitle(firstUserMsg.text) : 'محادثة جديدة';
+      const preview = lastMsg?.text ? lastMsg.text.slice(0, 160) : '';
 
-    syncChatSessionToCloud({
-      id: activeSessionId,
-      title,
-      preview,
-      lastUserPrompt: lastUserMsg?.text || '',
-      lastAiResponse: lastBotMsg?.text || '',
-      agentId: 'guide',
-      messagesCount: messages.length,
-    }).catch(() => {});
+      syncChatSessionToCloud({
+        id: activeSessionId,
+        title,
+        preview,
+        lastUserPrompt: lastUserMsg?.text || '',
+        lastAiResponse: lastBotMsg?.text || '',
+        agentId: 'guide',
+        messagesCount: messages.length,
+      }).catch(() => {});
+    }, 900);
+    return () => window.clearTimeout(timer);
   }, [messages, activeSessionId, firebaseUser]);
 
   const currentActiveSession = useMemo(() => {
@@ -2876,124 +3003,65 @@ export default function App() {
   }, [activeSessionId]);
 
   useEffect(() => {
-    localStorage.setItem('news', JSON.stringify(news));
+    const tId = window.setTimeout(() => {
+      try {
+        localStorage.setItem('news', JSON.stringify(news));
+      } catch {}
+    }, 250);
+    return () => window.clearTimeout(tId);
   }, [news]);
 
   useEffect(() => {
-    localStorage.setItem('fixes', JSON.stringify(fixes));
+    try {
+      localStorage.setItem('fixes', JSON.stringify(fixes));
+    } catch {}
   }, [fixes]);
 
   useEffect(() => {
-    localStorage.setItem('trip', JSON.stringify(trip));
+    try {
+      localStorage.setItem('trip', JSON.stringify(trip));
+    } catch {}
   }, [trip]);
 
   useEffect(() => {
-    localStorage.setItem('ain_salah_admin', isAdminLoggedIn ? 'true' : 'false');
+    try {
+      localStorage.setItem('ain_salah_admin', isAdminLoggedIn ? 'true' : 'false');
+    } catch {}
   }, [isAdminLoggedIn]);
 
   useEffect(() => {
-    localStorage.setItem('ain_salah_require_approval', requireApproval ? 'true' : 'false');
+    try {
+      localStorage.setItem('ain_salah_require_approval', requireApproval ? 'true' : 'false');
+    } catch {}
   }, [requireApproval]);
 
   useEffect(() => {
-    localStorage.setItem('ain_salah_weather_alert', JSON.stringify(weatherAlert));
-  }, [weatherAlert]);
-
-  useEffect(() => {
-    localStorage.setItem(
-      'ain_salah_notifications_history',
-      JSON.stringify(notificationHistory)
-    );
+    const tId = window.setTimeout(() => {
+      try {
+        localStorage.setItem(
+          'ain_salah_notifications_history',
+          JSON.stringify(notificationHistory)
+        );
+      } catch {}
+    }, 300);
+    return () => window.clearTimeout(tId);
   }, [notificationHistory]);
 
-  // Initial Comprehensive Brief notification (الأحوال الجوية + كل خبر موثق)
+  // Sync global notifications disabled setting on startup (Weather & Comprehensive Brief removed)
   useEffect(() => {
-    if (notificationsPermanentlyDisabled) return;
-
-    let isCancelled = false;
-    let timer: ReturnType<typeof setTimeout> | null = null;
-
     fetch('/api/global-settings')
       .then((res) => (res.ok ? res.json() : { notificationsPermanentlyDisabled: false }))
       .catch(() => ({ notificationsPermanentlyDisabled: false }))
       .then((globalConfig) => {
-        if (isCancelled) return;
         if (
           globalConfig?.notificationsPermanentlyDisabled ||
           localStorage.getItem('ain_salah_notifications_permanently_disabled') === 'true'
         ) {
           setNotificationsPermanentlyDisabled(true);
           setActiveNotifications([]);
-          return;
-        }
-
-        const approvedVerifiedNews = news.filter((item) => item.status === 'approved');
-        const hasWeather = weatherAlert.active && !isAlertDismissed;
-        if (!hasWeather && approvedVerifiedNews.length === 0) return;
-
-        const latestNewsSignature = approvedVerifiedNews.map((n) => n.id).join('_');
-        const notifiedKey = `notified_brief_${weatherAlert.timestamp || 'no_weather'}_${latestNewsSignature}`;
-
-        if (sessionStorage.getItem(notifiedKey) !== 'true') {
-          sessionStorage.setItem(notifiedKey, 'true');
-
-          const briefSlides = [
-            ...(hasWeather
-              ? [
-                  {
-                    id: 'weather-slide',
-                    source: weatherAlert.source || 'الأرصاد الجوية واليقظة',
-                    text: weatherAlert.message,
-                    categoryName: 'الأحوال الجوية',
-                    categoryEmoji: '🌤️',
-                    isWeatherAlert: true,
-                  },
-                ]
-              : []),
-            ...approvedVerifiedNews.map((item) => {
-              const cat = getCategoryDetails(item.category);
-              return {
-                id: item.id,
-                source: item.s,
-                text: item.t,
-                categoryName: cat.name,
-                categoryEmoji: cat.emoji,
-                isWeatherAlert: false,
-              };
-            }),
-          ];
-
-          const firstSlide = briefSlides[0];
-          const briefNotif: AppNotification = {
-            id: `brief-${Date.now()}`,
-            type: 'comprehensive_brief',
-            title: hasWeather
-              ? weatherAlert.title
-              : `موجز الأخبار الموثقة: ${firstSlide?.source || 'تديكلت'}`,
-            message: firstSlide?.text || '',
-            severity: hasWeather ? weatherAlert.severity : 'info',
-            isVerified: true,
-            verifiedItems: briefSlides,
-            duration: 12000,
-            timestamp: Date.now(),
-            actionLabel: 'تفاصيل التنبيه والأخبار الموثقة',
-            onAction: () => setView('news'),
-          };
-
-          // Quietly register into notification list without bursting an intrusive toast on entrance
-          setNotificationHistory((prev) => {
-            const exists = prev.some((p) => p.type === 'comprehensive_brief');
-            if (exists) return prev;
-            return [briefNotif, ...prev].slice(0, 30);
-          });
         }
       });
-
-    return () => {
-      isCancelled = true;
-      if (timer) clearTimeout(timer);
-    };
-  }, [notificationsPermanentlyDisabled]);
+  }, []);
 
   // Timer for trip countdown (only active when a trip is registered)
   useEffect(() => {
@@ -4198,8 +4266,48 @@ export default function App() {
   };
 
   // Trip Tracker Actions
+  const [customDesertChecklist, setCustomDesertChecklist] = useState<string[]>(loadDesertChecklist);
+
+  useEffect(() => {
+    const syncDesertOwner = () => {
+      setCustomDesertChecklist(loadDesertChecklist());
+      const storedTrips = loadDesertTrips();
+      const active = storedTrips.find((tr) => tr.status === 'active');
+      if (active) {
+        setTrip({
+          d: active.d,
+          r: new Date(active.t).toISOString().slice(0, 16),
+          p: active.p,
+        });
+      }
+    };
+    window.addEventListener('tidikelt-owner-sync', syncDesertOwner);
+    return () => window.removeEventListener('tidikelt-owner-sync', syncDesertOwner);
+  }, []);
+
   const handleRegisterTrip = () => {
     if (!tripDest.trim() || !tripReturn) return;
+    if (tripPhone.trim() && isTargetBanned(tripPhone.trim())) {
+      pushInAppNotification({
+        type: 'system',
+        title: 'رقم هاتف محظور',
+        message: 'عذراً، هذا الرقم محظور من قبل إدارة منصة تيدكلت AI.',
+      });
+      return;
+    }
+    const returnTs = new Date(tripReturn).getTime() || Date.now() + 3600000 * 4;
+    const currentTrips = loadDesertTrips();
+    saveDesertTrips([
+      {
+        id: `trip-${Date.now()}`,
+        d: tripDest.trim(),
+        t: returnTs,
+        p: tripPhone.trim(),
+        status: 'active',
+        createdAt: Date.now(),
+      },
+      ...currentTrips,
+    ]);
     setTrip({
       d: tripDest.trim(),
       r: tripReturn,
@@ -4212,6 +4320,10 @@ export default function App() {
 
   const handleClearTrip = () => {
     setTrip(null);
+    const currentTrips = loadDesertTrips().map((tr) =>
+      tr.status === 'active' ? { ...tr, status: 'completed' as const } : tr
+    );
+    saveDesertTrips(currentTrips);
   };
 
   // Geolocation Action
@@ -4410,6 +4522,42 @@ export default function App() {
 
       {/* PIN Authentication Modal is rendered once at the root level with .admin-pin-modal */}
 
+      {/* Direct Browser 1-Tap Install Banner when opened in Chrome with ?install=1 */}
+      {showDirectInstallBanner && !isInstalled && (
+        <div className="fixed top-2 inset-x-3 z-[90] max-w-md mx-auto bg-[#065f46] text-white rounded-2xl p-3 shadow-2xl border border-emerald-400/40 flex items-center justify-between gap-2">
+          <div className="min-w-0">
+            <b className="text-xs font-extrabold block">تثبيت مباشر للتطبيق الكامل على هاتفك</b>
+            <span className="text-[11px] text-emerald-100 block">
+              {isInstallable
+                ? 'اضغط على زر «تثبيت الآن» لإضافة التطبيق فوراً من متصفح Chrome'
+                : 'من قائمة متصفح Chrome (⋮) اختر «تثبيت التطبيق» أو «إضافة للشاشة الرئيسية»'}
+            </span>
+          </div>
+          <div className="flex items-center gap-1.5 shrink-0">
+            {isInstallable && (
+              <button
+                type="button"
+                onClick={async () => {
+                  const ok = await installPWA();
+                  if (ok) setShowDirectInstallBanner(false);
+                }}
+                className="px-3 py-1.5 rounded-xl bg-white text-[#065f46] text-xs font-extrabold cursor-pointer shadow-sm"
+              >
+                تثبيت الآن
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => setShowDirectInstallBanner(false)}
+              className="p-1.5 rounded-lg text-emerald-100 hover:bg-white/10 cursor-pointer"
+              aria-label="إغلاق"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Mobile Drawer Overlay */}
       {isMobileSidebarOpen && !isMindFocusMode && (
         <div
@@ -4537,95 +4685,180 @@ export default function App() {
         </div>
 
         {/* Sidebar Scrollable & Resizable Body: Views & Navigation */}
-        <div className="flex-1 min-h-0 overflow-hidden p-3 flex flex-col gap-1.5 transition-all duration-200">
-          {/* 1. Featured Navigation Views (Moved to Top) */}
-          <div className="shrink-0 pb-1 transition-all duration-200">
-            <div className="flex items-center justify-between px-1.5 mb-1.5 gap-1">
-              <span className="text-[10px] uppercase font-bold text-[var(--mute)] tracking-wider truncate">
+        <div className="flex-1 min-h-0 overflow-hidden px-2.5 py-2 flex flex-col gap-1.5 transition-all duration-200">
+          {/* 1. Compact Sections & Services (Only 2 shown by default + Show More) */}
+          <div className="shrink-0 pb-0.5 transition-all duration-200">
+            <div className="flex items-center justify-between px-1.5 mb-1 gap-1">
+              <span className="text-[9.5px] uppercase font-bold text-[var(--mute)] tracking-wider truncate">
                 {t.sectionsAndServices}
               </span>
-            </div>
-
-            <div className="space-y-1">
-              {/* 1. Kash Bilasa Inter-Wilaya Ride Sharing */}
               <button
                 type="button"
-                onClick={() => {
-                  setView('rides');
-                  setIsMobileSidebarOpen(false);
-                }}
-                className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-xl text-xs font-semibold transition-all cursor-pointer border ${
-                  view === 'rides'
-                    ? 'bg-[var(--green)]/20 border-[var(--green)] text-[var(--green)] font-bold shadow-xs'
-                    : 'text-[var(--ink)] hover:bg-[var(--bg)] border-[var(--green)]/30 bg-[var(--green)]/10'
-                }`}
+                onClick={() => setIsSidebarMoreOpen((prev) => !prev)}
+                className="inline-flex items-center gap-0.5 text-[9.5px] font-bold text-[var(--green)] hover:underline cursor-pointer transition-colors"
               >
-                <div className="flex items-center gap-2 min-w-0">
-                  <Car className="w-3.5 h-3.5 text-[var(--green)] shrink-0" />
-                  <span className="truncate font-bold text-[11.5px]">
-                    {lang === 'ar' ? 'كاش بلاصة معك · رحلات' : 'Kash Bilasa · Rides'}
-                  </span>
-                </div>
-                <span className="text-[9.5px] font-mono tabular-nums text-[var(--green)] font-bold shrink-0">
-                  58 ولاية
+                <span>
+                  {isSidebarMoreOpen
+                    ? lang === 'ar'
+                      ? 'عرض أقل'
+                      : 'Show Less'
+                    : lang === 'ar'
+                    ? 'مشاهدة المزيد'
+                    : 'Show More'}
                 </span>
+                {isSidebarMoreOpen ? (
+                  <ChevronUp className="w-2.5 h-2.5" />
+                ) : (
+                  <ChevronDown className="w-2.5 h-2.5" />
+                )}
               </button>
+            </div>
 
-              {/* 2. Smart Chat */}
+            <div className="space-y-0.5">
+              {/* 1. المحادثة الذكية (Smart Chat) — Top Item */}
               <button
+                type="button"
                 onClick={() => {
                   setView('chat');
                   setIsMobileSidebarOpen(false);
                 }}
-                className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
+                className={`w-full flex items-center justify-between px-2 py-1 rounded-lg text-[10.5px] font-semibold transition-all cursor-pointer border ${
                   view === 'chat'
-                    ? 'bg-[var(--green)]/15 text-[var(--green)] font-bold'
-                    : 'text-[var(--ink)] hover:bg-[var(--bg)]'
+                    ? 'bg-[var(--green)]/15 border-[var(--green)]/40 text-[var(--green)] font-bold shadow-2xs'
+                    : 'text-[var(--ink)] hover:bg-[var(--bg)] border-transparent'
                 }`}
               >
-                <div className="flex items-center gap-2 min-w-0">
-                  <MessageSquare className="w-3.5 h-3.5 shrink-0" />
-                  <span className="truncate text-[11.5px]">{t.smartChat}</span>
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <MessageSquare className="w-3 h-3 text-[var(--green)] shrink-0" />
+                  <span className="truncate text-[10.5px]">{t.smartChat}</span>
                 </div>
                 {messages.length > 0 && (
-                  <span className="text-[9.5px] opacity-75 font-mono px-1.5 py-0.5 rounded-full bg-black/5 dark:bg-white/10 shrink-0">
+                  <span className="text-[8.5px] opacity-80 font-mono px-1.5 py-0.2 rounded-full bg-black/5 dark:bg-white/10 shrink-0">
                     {messages.length}
                   </span>
                 )}
               </button>
 
-              {/* 3. Local News */}
+              {/* 2. باب الخير (Bab Al-Khair Charity Platform) — Second Item */}
               <button
+                type="button"
                 onClick={() => {
-                  setView('news');
+                  setView('charity');
                   setIsMobileSidebarOpen(false);
                 }}
-                className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
-                  view === 'news'
-                    ? 'bg-[var(--green)]/15 text-[var(--green)] font-bold'
-                    : 'text-[var(--ink)] hover:bg-[var(--bg)]'
+                title={
+                  lang === 'ar'
+                    ? 'تطبيق باب الخير · منصة العمل الخيري والتضامني'
+                    : 'Bab Al-Khair · Charity Platform'
+                }
+                aria-label={
+                  lang === 'ar'
+                    ? 'تطبيق باب الخير · منصة العمل الخيري والتضامني'
+                    : 'Bab Al-Khair · Charity Platform'
+                }
+                className={`w-full flex items-center justify-between px-2 py-1 rounded-lg text-[10.5px] font-semibold transition-all cursor-pointer border ${
+                  view === 'charity'
+                    ? 'bg-emerald-600/15 border-emerald-600/50 text-emerald-700 dark:text-emerald-300 font-bold shadow-2xs'
+                    : 'text-[var(--ink)] hover:bg-[var(--bg)] border-transparent'
                 }`}
               >
-                <div className="flex items-center gap-2 min-w-0">
-                  <span className="shrink-0 text-xs">📰</span>
-                  <span className="truncate text-[11.5px]">
-                    {lang === 'ar' ? 'كاش ما تعرف · محليات' : t.localNews}
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <HeartHandshake className="w-3 h-3 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                  <span className="truncate text-[10.5px]">
+                    {lang === 'ar' ? 'باب الخير · العمل الخيري' : 'Bab Al-Khair · Charity'}
                   </span>
                 </div>
-                {approvedNews.length > 0 && (
-                  <span className="text-[9.5px] font-bold px-1.5 py-0.5 rounded-full bg-[var(--green)]/20 text-[var(--green)] shrink-0">
-                    {approvedNews.length}
-                  </span>
+                <span className="text-[8.5px] font-semibold text-emerald-600 dark:text-emerald-400 shrink-0">
+                  {lang === 'ar' ? 'تضامن' : 'Solidarity'}
+                </span>
+              </button>
+
+              {/* Hidden items revealed only upon clicking "مشاهدة المزيد" */}
+              {isSidebarMoreOpen && (
+                <div className="space-y-0.5 pt-0.5 animate-in fade-in duration-150">
+                  {/* 3. محليات (Local News) — Third Item */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setView('news');
+                      setIsMobileSidebarOpen(false);
+                    }}
+                    className={`w-full flex items-center justify-between px-2 py-1 rounded-lg text-[10.5px] font-semibold transition-all cursor-pointer border ${
+                      view === 'news'
+                        ? 'bg-[var(--green)]/15 border-[var(--green)]/40 text-[var(--green)] font-bold shadow-2xs'
+                        : 'text-[var(--ink)] hover:bg-[var(--bg)] border-transparent'
+                    }`}
+                  >
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <div className="w-4 h-4 rounded-md bg-amber-500/15 text-amber-500 flex items-center justify-center shrink-0">
+                        <Sparkles className="w-2.5 h-2.5 stroke-[2.5]" />
+                      </div>
+                      <span className="truncate text-[10.5px]">
+                        {lang === 'ar' ? 'محليات' : t.localNews}
+                      </span>
+                    </div>
+                    {approvedNews.length > 0 && (
+                      <span className="text-[8.5px] font-bold px-1.5 py-0.2 rounded-full bg-[var(--green)]/15 text-[var(--green)] shrink-0">
+                        {approvedNews.length}
+                      </span>
+                    )}
+                  </button>
+
+                  {/* 4. كاش بلاصة (Kash Bilasa Inter-Wilaya Ride Sharing) — Fourth Item */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setView('rides');
+                      setIsMobileSidebarOpen(false);
+                    }}
+                    className={`w-full flex items-center justify-between px-2 py-1 rounded-lg text-[10.5px] font-semibold transition-all cursor-pointer border ${
+                      view === 'rides'
+                        ? 'bg-[var(--green)]/15 border-[var(--green)]/40 text-[var(--green)] font-bold shadow-2xs'
+                        : 'text-[var(--ink)] hover:bg-[var(--bg)] border-transparent'
+                    }`}
+                  >
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <Car className="w-3 h-3 text-[var(--green)] shrink-0" />
+                      <span className="truncate text-[10.5px]">
+                        {lang === 'ar' ? 'طريقي' : 'Kash Bilasa · Rides'}
+                      </span>
+                    </div>
+                    <span className="text-[8.5px] font-mono tabular-nums text-[var(--green)] font-semibold shrink-0">
+                      58 ولاية
+                    </span>
+                  </button>
+                </div>
+              )}
+
+              {/* Compact "مشاهدة المزيد / إخفاء" trigger button at bottom of the 2 items */}
+              <button
+                type="button"
+                onClick={() => setIsSidebarMoreOpen((prev) => !prev)}
+                className="w-full flex items-center justify-center gap-1 py-0.5 px-2 rounded-md text-[9.5px] font-semibold text-[var(--mute)] hover:text-[var(--ink)] hover:bg-[var(--bg)]/80 transition-colors cursor-pointer"
+              >
+                <span>
+                  {isSidebarMoreOpen
+                    ? lang === 'ar'
+                      ? 'إخفاء الأقسام الإضافية'
+                      : 'Hide extra sections'
+                    : lang === 'ar'
+                    ? 'مشاهدة المزيد (محليات · كاش بلاصة)'
+                    : 'Show More (News · Rides)'}
+                </span>
+                {isSidebarMoreOpen ? (
+                  <ChevronUp className="w-2.5 h-2.5 shrink-0" />
+                ) : (
+                  <ChevronDown className="w-2.5 h-2.5 shrink-0" />
                 )}
               </button>
             </div>
           </div>
 
-          {/* 2. Archived Chat Sessions Section (Placed Below Sections & Services as requested) */}
-          <div className="flex-1 min-h-0 flex flex-col pt-1.5 border-t border-[var(--line)]/60">
-            <div className="flex items-center justify-between px-2 mb-1.5 shrink-0">
-              <span className="text-[10px] uppercase font-bold text-[var(--mute)] tracking-wider flex items-center gap-1.5">
-                <History className="w-3.5 h-3.5 text-[var(--mute)]" />
+          {/* 2. Primary Section: Archived Chat Sessions (سجل المحادثات هي الأساسية) */}
+          <div className="flex-1 min-h-0 flex flex-col pt-2 border-t border-[var(--line)]">
+            <div className="flex items-center justify-between px-1.5 mb-1.5 shrink-0">
+              <span className="text-[11px] font-extrabold text-[var(--ink)] tracking-tight flex items-center gap-1.5">
+                <History className="w-3.5 h-3.5 text-[var(--green)]" />
                 <span>{t.archivedSessions}</span>
               </span>
               {chatSessions.length > 0 && (
@@ -4636,8 +4869,8 @@ export default function App() {
             </div>
 
             {chatSessions.length === 0 ? (
-              <div className="px-2.5 py-2.5 text-center border border-dashed border-[var(--line)]/60 rounded-xl my-1 bg-[var(--bg)]/30">
-                <p className="text-[10px] text-[var(--mute)] leading-relaxed m-0">{t.noArchivedSessions}</p>
+              <div className="px-2.5 py-3 text-center border border-dashed border-[var(--line)]/60 rounded-xl my-1 bg-[var(--bg)]/30">
+                <p className="text-[10.5px] text-[var(--mute)] leading-relaxed m-0">{t.noArchivedSessions}</p>
               </div>
             ) : (
               <div className="space-y-1 flex-1 min-h-0 overflow-y-auto pr-0.5">
@@ -4812,30 +5045,24 @@ export default function App() {
 
         {/* Sidebar Footer — Compact & Slim */}
         <div className="px-2 py-1.5 border-t border-[var(--line)] flex flex-col gap-1.5">
-          {/* Direct Download App Link - Immediate File Download */}
-          <a
+          {/* Direct Full-App Install & Desktop/Home-Screen Shortcut Button */}
+          <button
+            type="button"
             id="openDownload"
-            href="/downloads/tidikelt-ai-release.apk"
-            download="tidikelt-ai-release.apk"
-            onClick={() => {
-              pushInAppNotification({
-                type: 'system',
-                title: lang === 'ar' ? 'جاري تنزيل التطبيق' : 'Downloading App',
-                message:
-                  lang === 'ar'
-                    ? 'بدأ تنزيل ملف التطبيق (tidikelt-ai-release.apk) مباشرة على جهازك.'
-                    : 'Direct download of tidikelt-ai-release.apk has started.',
-              });
-            }}
+            onClick={handleDirectBrowserOrLightDownload}
             className="download-button w-full flex items-center justify-center gap-1.5 py-1.5 px-2.5 rounded-lg border border-emerald-600/40 bg-[#176b52] hover:bg-[#125742] text-white text-[11px] font-bold cursor-pointer transition-all shadow-xs active:scale-[0.98] no-underline"
-            title={lang === 'ar' ? 'تنزيل ملف التطبيق مباشرة' : 'Download App File Directly'}
-            aria-label={lang === 'ar' ? 'تنزيل ملف التطبيق مباشرة' : 'Download App File Directly'}
+            title={lang === 'ar' ? 'تثبيت التطبيق الكامل مباشرة على الشاشة الرئيسية أو سطح المكتب' : 'Install Full App to Home Screen or Desktop'}
+            aria-label={lang === 'ar' ? 'تنزيل التطبيق' : 'Download App'}
           >
             <Download className="w-3.5 h-3.5 shrink-0" />
             <span className="font-bold">
-              {lang === 'ar' ? 'تنزيل التطبيق' : lang === 'fr' ? "Télécharger l'application" : 'Download App'}
+              {lang === 'ar'
+                ? 'تنزيل التطبيق'
+                : lang === 'fr'
+                ? "Installer l'application"
+                : 'Download App'}
             </span>
-          </a>
+          </button>
 
           {/* Controls Row: Theme, Sound, Cloud Sync, and App Badge */}
           <div className="flex items-center justify-between gap-1">
@@ -4988,6 +5215,66 @@ export default function App() {
         </div>
       )}
 
+      {/* 1-Click Direct Full App Install Banner when launched via shortcut or ?install=1 */}
+      {showDirectInstallBanner && !isInstalled && (
+        <div
+          className="fixed bottom-4 inset-x-3 sm:inset-x-auto sm:end-5 sm:w-96 z-50 rounded-2xl bg-[var(--card)] border-2 border-[var(--green)] p-3.5 shadow-2xl flex items-center justify-between gap-3 animate-in fade-in slide-in-from-bottom-3"
+          dir={lang === 'ar' ? 'rtl' : 'ltr'}
+        >
+          <div className="flex items-center gap-2.5 min-w-0">
+            <img
+              src="/icon.svg"
+              alt={t.appName}
+              referrerPolicy="no-referrer"
+              className="w-10 h-10 rounded-xl object-cover shrink-0 ring-1 ring-[var(--green)]/40"
+            />
+            <div className="min-w-0">
+              <div className="text-xs font-extrabold text-[var(--ink)] truncate">
+                {lang === 'ar' ? `تثبيت ${t.appName} الكامل` : `Install Full ${t.appName}`}
+              </div>
+              <div className="text-[11px] text-[var(--mute)] truncate">
+                {lang === 'ar'
+                  ? 'إضافة مباشرة إلى الشاشة الرئيسية وسطح المكتب'
+                  : 'Add directly to Home Screen & Desktop'}
+              </div>
+            </div>
+          </div>
+          <div className="flex items-center gap-1.5 shrink-0">
+            <button
+              type="button"
+              onClick={async () => {
+                const ua = typeof navigator !== 'undefined' ? navigator.userAgent.toLowerCase() : '';
+                const isMobile = /android|iphone|ipad|ipod|mobile/i.test(ua);
+                if (isInstallable) {
+                  const ok = await installPWA();
+                  if (ok) setShowDirectInstallBanner(false);
+                } else if (isIOS) {
+                  setShowIOSInstallGuide(true);
+                  setIsDownloadModalOpen(true);
+                } else if (!isMobile) {
+                  triggerSilentShortcutDownload('/api/apk/desktop-shortcut', 'Tidikelt-AI.url');
+                  setShowDirectInstallBanner(false);
+                } else {
+                  setIsDownloadModalOpen(true);
+                  setShowDirectInstallBanner(false);
+                }
+              }}
+              className="px-3 py-1.5 rounded-xl bg-[var(--green)] hover:opacity-95 text-white text-xs font-extrabold cursor-pointer shadow-xs"
+            >
+              {lang === 'ar' ? 'تثبيت الآن' : 'Install'}
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowDirectInstallBanner(false)}
+              className="p-1.5 rounded-lg text-[var(--mute)] hover:text-[var(--ink)] cursor-pointer"
+              aria-label="إغلاق"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Main AI Workspace Container */}
       <main className="flex-1 flex flex-col h-full min-w-0 overflow-hidden relative">
         {/* Floating Exit Pill when Mind Focus Mode is Active */}
@@ -5035,8 +5322,8 @@ export default function App() {
           </div>
         )}
 
-        {/* Modern AI Top Header (Hidden when Mind Focus Mode is active OR in News/Rides views which have their own dedicated header) */}
-        {!isMindFocusMode && view !== 'news' && view !== 'rides' && (
+        {/* Modern AI Top Header (Hidden when Mind Focus Mode is active OR in News/Rides/Charity views which have their own dedicated header) */}
+        {!isMindFocusMode && view !== 'news' && view !== 'rides' && view !== 'charity' && (
           <header className="relative h-14 border-b border-[var(--line)]/80 bg-[var(--card)]/90 backdrop-blur-md px-3 sm:px-4 flex items-center justify-between shrink-0 z-30 transition-all duration-200">
             <div className="flex items-center gap-2 sm:gap-2.5 min-w-0">
               {/* Sidebar toggle for Desktop and Mobile */}
@@ -5215,8 +5502,8 @@ export default function App() {
                       ? 'bg-[var(--green)]/15 border-[var(--green)] text-[var(--green)] ring-2 ring-[var(--green)]/20 shadow-xs'
                       : 'bg-[var(--bg)] hover:bg-[var(--line)]/40 border border-[var(--line)] text-[var(--ink)] hover:text-[var(--green)] shadow-2xs'
                   }`}
-                  title={lang === 'ar' ? 'الإشعارات والتنبيهات (مثل فيسبوك)' : 'Notifications'}
-                  aria-label="الإشعارات والتنبيهات"
+                  title={lang === 'ar' ? 'تنبيهات' : 'Notifications'}
+                  aria-label={lang === 'ar' ? 'تنبيهات' : 'Notifications'}
                   aria-expanded={isNotifMenuOpen}
                 >
                   <Bell className="w-4 h-4 shrink-0" />
@@ -5321,7 +5608,7 @@ export default function App() {
                           </p>
                           <p className="text-[11px] text-[var(--mute)] m-0 max-w-xs mx-auto leading-relaxed">
                             {lang === 'ar'
-                              ? 'ستصلك هنا كافة تنبيهات الطقس واليقظة والأخبار الموثقة الخاصة بعين صالح وتديكلت.'
+                              ? 'ستصلك هنا كافة الإشعارات والأخبار المحلية الموثقة الخاصة بعين صالح وتديكلت.'
                               : 'Live alerts and verified community news will appear here.'}
                           </p>
                         </div>
@@ -5345,29 +5632,9 @@ export default function App() {
                             >
                               {/* Icon Badge */}
                               <div className="shrink-0 mt-0.5">
-                                {n.type === 'weather' ? (
-                                  <div
-                                    className={`w-9 h-9 rounded-full flex items-center justify-center ${
-                                      n.severity === 'danger'
-                                        ? 'bg-rose-500/15 text-rose-500'
-                                        : 'bg-amber-500/15 text-amber-500'
-                                    }`}
-                                  >
-                                    {n.severity === 'danger' ? (
-                                      <Flame className="w-4 h-4 animate-pulse" />
-                                    ) : (
-                                      <Wind className="w-4 h-4 animate-pulse" />
-                                    )}
-                                  </div>
-                                ) : n.type === 'comprehensive_brief' ? (
-                                  <div className="w-9 h-9 rounded-full bg-emerald-500/15 text-emerald-600 flex items-center justify-center">
-                                    <Sparkles className="w-4 h-4" />
-                                  </div>
-                                ) : (
-                                  <div className="w-9 h-9 rounded-full bg-[var(--green)]/15 text-[var(--green)] flex items-center justify-center font-bold text-sm">
-                                    {n.categoryEmoji || '📰'}
-                                  </div>
-                                )}
+                                <div className="w-9 h-9 rounded-full bg-[var(--green)]/15 text-[var(--green)] flex items-center justify-center font-bold text-sm">
+                                  {n.categoryEmoji || '📰'}
+                                </div>
                               </div>
 
                               {/* Content */}
@@ -7445,7 +7712,10 @@ export default function App() {
             isAdminLoggedIn={isAdminLoggedIn}
             pendingCount={pendingNews.length}
             requireApproval={requireApproval}
-            onOpenAdmin={() => setView('admin')}
+            onOpenAdmin={() => {
+              setView('admin');
+              setAdminTab('news');
+            }}
             onBackToChat={() => setView('chat')}
             onEditNewsInAdmin={(item) => {
               setView('admin');
@@ -7487,6 +7757,10 @@ export default function App() {
               onClose={() => setView('chat')}
               onBackToChat={() => setView('chat')}
               onOpenNews={() => setView('news')}
+              onOpenAdmin={() => {
+                setView('admin');
+                setAdminTab('rides');
+              }}
               onToggleSidebar={() => {
                 if (window.innerWidth < 768) {
                   setIsMobileSidebarOpen((prev) => !prev);
@@ -7500,9 +7774,41 @@ export default function App() {
           </div>
         )}
 
+        {/* VIEW: BAB AL-KHAIR CHARITY SECTION / تطبيق باب الخير - منصة العمل الخيري */}
+        {view === 'charity' && (
+          <div className="flex-1 flex flex-col w-full h-full min-h-0 overflow-hidden animate-in fade-in">
+            <MyCharitySection
+              isAdminLoggedIn={isAdminLoggedIn}
+              onBackToChat={() => setView('chat')}
+              onOpenAdminPanel={() => {
+                setView('admin');
+                setAdminTab('charity');
+              }}
+              onNotify={(payload) => {
+                pushInAppNotification({
+                  type: 'news',
+                  title: payload.title,
+                  message: payload.message,
+                  categoryEmoji: '🤝',
+                  onAction: () => setView('charity'),
+                });
+              }}
+              onToggleSidebar={() => {
+                if (window.innerWidth < 768) {
+                  setIsMobileSidebarOpen((prev) => !prev);
+                } else {
+                  setIsSidebarOpen((prev) => !prev);
+                }
+              }}
+            />
+          </div>
+        )}
+
         {/* VIEW: GOOGLE MAPS & TASKS + CLOUD SQL */}
         {view === 'maps_tasks' && (
-          <OasisMapAndTasksPage firebaseUser={firebaseUser} />
+          <Suspense fallback={<div className="flex-1 flex items-center justify-center p-8 text-xs text-[var(--mute)]">جاري التحميل...</div>}>
+            <OasisMapAndTasksPage firebaseUser={firebaseUser} />
+          </Suspense>
         )}
 
         {/* VIEW: ADMIN / مدير النظام (Strictly guarded by active owner session) */}
@@ -7587,94 +7893,208 @@ export default function App() {
               </div>
             </div>
 
-            {/* Admin Tabs: 6 Distinct Sections (جهات ست مرتبة) with all buttons >= 44px */}
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 p-1.5 bg-[var(--card)] border border-[var(--line)] rounded-2xl shadow-sm">
-              <button
-                type="button"
-                onClick={() => setAdminTab('news')}
-                className={`min-h-[44px] py-2.5 px-3 rounded-xl text-xs font-bold whitespace-nowrap transition-all cursor-pointer flex items-center justify-center gap-2 relative ${
-                  adminTab === 'news'
-                    ? 'bg-[var(--green)] text-[var(--on)] shadow-sm'
-                    : 'bg-[var(--bg)] border border-[var(--line)] text-[var(--mute)] hover:text-[var(--ink)] hover:border-[var(--green)]'
-                }`}
-              >
-                <Megaphone className="w-4 h-4 shrink-0" />
-                <span>1. المستجدات والأخبار</span>
-                {pendingNews.length > 0 && (
-                  <span className="px-1.5 py-0.5 rounded-full text-[10px] font-black bg-[var(--gold)] text-black">
-                    {pendingNews.length}
-                  </span>
-                )}
-              </button>
+            {/* Bab Al-Khair Charity Association Membership Approvals (Tidikelt AI Owner Exclusive) */}
+            <CharityAdminApprovalBox
+              onOpenCharityView={() => setView('charity')}
+              onNotify={(title, message) => {
+                pushInAppNotification({
+                  type: 'news',
+                  title,
+                  message,
+                  categoryEmoji: '🤝',
+                  onAction: () => setView('charity'),
+                });
+              }}
+            />
 
-              <button
-                type="button"
-                onClick={() => setAdminTab('weather')}
-                className={`min-h-[44px] py-2.5 px-3 rounded-xl text-xs font-bold whitespace-nowrap transition-all cursor-pointer flex items-center justify-center gap-2 ${
-                  adminTab === 'weather'
-                    ? 'bg-[var(--gold)] text-black shadow-sm font-extrabold'
-                    : 'bg-[var(--bg)] border border-[var(--line)] text-[var(--mute)] hover:text-[var(--ink)] hover:border-[var(--gold)]'
-                }`}
-              >
-                <Wind className="w-4 h-4 shrink-0" />
-                <span>2. تنبيه الطقس والموجز</span>
-              </button>
+            {/* Admin Tabs: Dedicated Department for Every Service Section (جهات أقسام الخدمات + الحظر والإدارة) */}
+            <div className="bg-[var(--card)] border border-[var(--line)] rounded-2xl p-2.5 shadow-sm space-y-2">
+              <div className="flex items-center justify-between px-1">
+                <span className="text-[11px] font-extrabold text-[var(--mute)]">
+                  جهات أقسام الخدمات والتحكم الشامل للمالك (تعديل · تغيير · اطلاع · حذف · حظر):
+                </span>
+                <span className="text-[10px] font-mono tabular-nums text-emerald-600 font-bold">
+                  11 جهة متكاملة
+                </span>
+              </div>
 
-              <button
-                type="button"
-                onClick={() => setAdminTab('analytics')}
-                className={`min-h-[44px] py-2.5 px-3 rounded-xl text-xs font-bold whitespace-nowrap transition-all cursor-pointer flex items-center justify-center gap-2 ${
-                  adminTab === 'analytics'
-                    ? 'bg-[var(--green)] text-[var(--on)] shadow-sm'
-                    : 'bg-[var(--bg)] border border-[var(--line)] text-[var(--mute)] hover:text-[var(--ink)] hover:border-[var(--green)]'
-                }`}
-              >
-                <BarChart3 className="w-4 h-4 shrink-0" />
-                <span>3. مؤشرات الأداء</span>
-              </button>
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setAdminTab('news')}
+                  className={`min-h-[44px] py-2.5 px-3 rounded-xl text-xs font-bold whitespace-nowrap transition-all cursor-pointer flex items-center justify-center gap-2 relative ${
+                    adminTab === 'news'
+                      ? 'bg-[var(--green)] text-[var(--on)] shadow-sm'
+                      : 'bg-[var(--bg)] border border-[var(--line)] text-[var(--mute)] hover:text-[var(--ink)] hover:border-[var(--green)]'
+                  }`}
+                >
+                  <Megaphone className="w-4 h-4 shrink-0" />
+                  <span>1. جهة الأخبار</span>
+                  {pendingNews.length > 0 && (
+                    <span className="px-1.5 py-0.5 rounded-full text-[10px] font-black bg-[var(--gold)] text-black tabular-nums">
+                      {pendingNews.length}
+                    </span>
+                  )}
+                </button>
 
-              <button
-                type="button"
-                onClick={() => {
-                  setAdminTab('ratings');
-                  fetchAnalytics();
-                }}
-                className={`min-h-[44px] py-2.5 px-3 rounded-xl text-xs font-bold whitespace-nowrap transition-all cursor-pointer flex items-center justify-center gap-2 ${
-                  adminTab === 'ratings'
-                    ? 'bg-emerald-600 text-white shadow-sm'
-                    : 'bg-[var(--bg)] border border-[var(--line)] text-[var(--mute)] hover:text-[var(--ink)] hover:border-emerald-500'
-                }`}
-              >
-                <ThumbsUp className="w-4 h-4 shrink-0" />
-                <span>4. تقييمات الخدمة ({analyticsData?.ratingsStats?.total ?? 0})</span>
-              </button>
+                <button
+                  type="button"
+                  onClick={() => setAdminTab('charity')}
+                  className={`min-h-[44px] py-2.5 px-3 rounded-xl text-xs font-bold whitespace-nowrap transition-all cursor-pointer flex items-center justify-center gap-2 ${
+                    adminTab === 'charity'
+                      ? 'bg-emerald-600 text-white shadow-sm'
+                      : 'bg-[var(--bg)] border border-[var(--line)] text-[var(--mute)] hover:text-[var(--ink)] hover:border-emerald-500'
+                  }`}
+                >
+                  <HeartHandshake className="w-4 h-4 shrink-0" />
+                  <span>2. جهة باب الخير</span>
+                </button>
 
-              <button
-                type="button"
-                onClick={() => setAdminTab('pin')}
-                className={`min-h-[44px] py-2.5 px-3 rounded-xl text-xs font-bold whitespace-nowrap transition-all cursor-pointer flex items-center justify-center gap-2 ${
-                  adminTab === 'pin'
-                    ? 'bg-amber-600 text-white shadow-sm'
-                    : 'bg-[var(--bg)] border border-[var(--line)] text-[var(--mute)] hover:text-[var(--ink)] hover:border-amber-500'
-                }`}
-              >
-                <Lock className="w-4 h-4 shrink-0" />
-                <span>5. رمز المشرف (PIN)</span>
-              </button>
+                <button
+                  type="button"
+                  onClick={() => setAdminTab('rides')}
+                  className={`min-h-[44px] py-2.5 px-3 rounded-xl text-xs font-bold whitespace-nowrap transition-all cursor-pointer flex items-center justify-center gap-2 ${
+                    adminTab === 'rides'
+                      ? 'bg-[var(--green)] text-[var(--on)] shadow-sm'
+                      : 'bg-[var(--bg)] border border-[var(--line)] text-[var(--mute)] hover:text-[var(--ink)] hover:border-[var(--green)]'
+                  }`}
+                >
+                  <Car className="w-4 h-4 shrink-0" />
+                  <span>3. جهة رفيق الطريق</span>
+                </button>
 
-              <button
-                type="button"
-                onClick={() => setAdminTab('settings')}
-                className={`min-h-[44px] py-2.5 px-3 rounded-xl text-xs font-bold whitespace-nowrap transition-all cursor-pointer flex items-center justify-center gap-2 ${
-                  adminTab === 'settings'
-                    ? 'bg-[var(--green)] text-[var(--on)] shadow-sm'
-                    : 'bg-[var(--bg)] border border-[var(--line)] text-[var(--mute)] hover:text-[var(--ink)] hover:border-[var(--green)]'
-                }`}
-              >
-                <SlidersHorizontal className="w-4 h-4 shrink-0" />
-                <span>6. الصيانة والإعدادات</span>
-              </button>
+                <button
+                  type="button"
+                  onClick={() => setAdminTab('maps_tasks')}
+                  className={`min-h-[44px] py-2.5 px-3 rounded-xl text-xs font-bold whitespace-nowrap transition-all cursor-pointer flex items-center justify-center gap-2 ${
+                    adminTab === 'maps_tasks'
+                      ? 'bg-emerald-600 text-white shadow-sm'
+                      : 'bg-[var(--bg)] border border-[var(--line)] text-[var(--mute)] hover:text-[var(--ink)] hover:border-emerald-500'
+                  }`}
+                >
+                  <MapPin className="w-4 h-4 shrink-0" />
+                  <span>4. جهة الخريطة والمهام</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setAdminTab('desert')}
+                  className={`min-h-[44px] py-2.5 px-3 rounded-xl text-xs font-bold whitespace-nowrap transition-all cursor-pointer flex items-center justify-center gap-2 ${
+                    adminTab === 'desert'
+                      ? 'bg-amber-500 text-black font-extrabold shadow-sm'
+                      : 'bg-[var(--bg)] border border-[var(--line)] text-[var(--mute)] hover:text-[var(--ink)] hover:border-amber-500'
+                  }`}
+                >
+                  <Compass className="w-4 h-4 shrink-0" />
+                  <span>5. جهة الرحلات والصحراء</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setAdminTab('agents')}
+                  className={`min-h-[44px] py-2.5 px-3 rounded-xl text-xs font-bold whitespace-nowrap transition-all cursor-pointer flex items-center justify-center gap-2 ${
+                    adminTab === 'agents'
+                      ? 'bg-emerald-600 text-white shadow-sm'
+                      : 'bg-[var(--bg)] border border-[var(--line)] text-[var(--mute)] hover:text-[var(--ink)] hover:border-emerald-500'
+                  }`}
+                >
+                  <Bot className="w-4 h-4 shrink-0" />
+                  <span>6. جهة الوكلاء</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setAdminTab('bans')}
+                  className={`min-h-[44px] py-2.5 px-3 rounded-xl text-xs font-bold whitespace-nowrap transition-all cursor-pointer flex items-center justify-center gap-2 ${
+                    adminTab === 'bans'
+                      ? 'bg-rose-600 text-white shadow-sm'
+                      : 'bg-[var(--bg)] border border-[var(--line)] text-[var(--mute)] hover:text-rose-500 hover:border-rose-500'
+                  }`}
+                >
+                  <Ban className="w-4 h-4 shrink-0" />
+                  <span>7. الحظر وفك الحظر</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setAdminTab('analytics')}
+                  className={`min-h-[44px] py-2.5 px-3 rounded-xl text-xs font-bold whitespace-nowrap transition-all cursor-pointer flex items-center justify-center gap-2 ${
+                    adminTab === 'analytics'
+                      ? 'bg-[var(--green)] text-[var(--on)] shadow-sm'
+                      : 'bg-[var(--bg)] border border-[var(--line)] text-[var(--mute)] hover:text-[var(--ink)] hover:border-[var(--green)]'
+                  }`}
+                >
+                  <BarChart3 className="w-4 h-4 shrink-0" />
+                  <span>8. مؤشرات الأداء</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAdminTab('ratings');
+                    fetchAnalytics();
+                  }}
+                  className={`min-h-[44px] py-2.5 px-3 rounded-xl text-xs font-bold whitespace-nowrap transition-all cursor-pointer flex items-center justify-center gap-2 ${
+                    adminTab === 'ratings'
+                      ? 'bg-emerald-600 text-white shadow-sm'
+                      : 'bg-[var(--bg)] border border-[var(--line)] text-[var(--mute)] hover:text-[var(--ink)] hover:border-emerald-500'
+                  }`}
+                >
+                  <ThumbsUp className="w-4 h-4 shrink-0" />
+                  <span className="tabular-nums">9. التقييمات ({analyticsData?.ratingsStats?.total ?? 0})</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setAdminTab('pin')}
+                  className={`min-h-[44px] py-2.5 px-3 rounded-xl text-xs font-bold whitespace-nowrap transition-all cursor-pointer flex items-center justify-center gap-2 ${
+                    adminTab === 'pin'
+                      ? 'bg-amber-600 text-white shadow-sm'
+                      : 'bg-[var(--bg)] border border-[var(--line)] text-[var(--mute)] hover:text-[var(--ink)] hover:border-amber-500'
+                  }`}
+                >
+                  <Lock className="w-4 h-4 shrink-0" />
+                  <span>10. رمز المشرف (PIN)</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setAdminTab('settings')}
+                  className={`min-h-[44px] py-2.5 px-3 rounded-xl text-xs font-bold whitespace-nowrap transition-all cursor-pointer flex items-center justify-center gap-2 ${
+                    adminTab === 'settings'
+                      ? 'bg-[var(--green)] text-[var(--on)] shadow-sm'
+                      : 'bg-[var(--bg)] border border-[var(--line)] text-[var(--mute)] hover:text-[var(--ink)] hover:border-[var(--green)]'
+                  }`}
+                >
+                  <SlidersHorizontal className="w-4 h-4 shrink-0" />
+                  <span>11. الصيانة والإعدادات</span>
+                </button>
+              </div>
             </div>
+
+            {/* DEDICATED SERVICE DEPARTMENTS (باب الخير، رفيق الطريق، الخريطة، الرحلات، الوكلاء، الحظر وفك الحظر) */}
+            {(adminTab === 'charity' ||
+              adminTab === 'rides' ||
+              adminTab === 'maps_tasks' ||
+              adminTab === 'desert' ||
+              adminTab === 'agents' ||
+              adminTab === 'bans') && (
+              <OwnerServiceControlSections
+                section={adminTab as OwnerDepartmentSection}
+                onOpenServiceView={(targetView) => setView(targetView)}
+                onOpenTrainingStudio={(studioTab) => {
+                  setTrainingStudioInitialTab(studioTab);
+                  setIsTrainingStudioOpen(true);
+                }}
+                onNotify={(title, message) => {
+                  pushInAppNotification({
+                    type: 'system',
+                    title,
+                    message,
+                  });
+                }}
+              />
+            )}
 
             {/* TAB: SUPERVISOR ANALYTICS & SERVICE QUALITY DASHBOARD */}
             {adminTab === 'analytics' && (
@@ -7812,11 +8232,13 @@ export default function App() {
                 </div>
 
                 {/* Recharts 30-Day Agent Query Distribution Chart */}
-                <AgentAnalytics30DayChart
-                  agentStats={analyticsData?.agent30DayStats}
-                  dailyTrends={analyticsData?.daily30DaysTrend}
-                  totalQueries={analyticsData?.total30DayQueries}
-                />
+                <Suspense fallback={null}>
+                  <AgentAnalytics30DayChart
+                    agentStats={analyticsData?.agent30DayStats}
+                    dailyTrends={analyticsData?.daily30DaysTrend}
+                    totalQueries={analyticsData?.total30DayQueries}
+                  />
+                </Suspense>
 
                 {/* Daily Queries Chart (Last 7 Days) */}
                 <div className="bg-[var(--card)] border border-[var(--line)] rounded-2xl p-4 sm:p-5 shadow-sm space-y-3">
@@ -7983,10 +8405,10 @@ export default function App() {
                         </span>
                         <div className="p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/20 text-[11px] text-[var(--ink)] leading-relaxed space-y-1">
                           <p className="m-0 font-semibold text-amber-600 dark:text-amber-400">
-                            💡 زيادة استفسارات مسار الصحراء وRN1:
+                            💡 متابعة مسار الصحراء والطريق الوطني RN1:
                           </p>
                           <p className="m-0 text-[var(--mute)] leading-relaxed">
-                            يُفضل تحديث التنبيه الجوي العاجل باستمرار في خانة «تنبيه الطقس» لضمان سلامة سالكي الطريق.
+                            يُفضل تحديث إرشادات السلامة وحالة الطريق باستمرار في جهة الرحلات والأخبار لضمان سلامة المسافرين.
                           </p>
                         </div>
                         <div className="p-2.5 rounded-xl bg-blue-500/10 border border-blue-500/20 text-[11px] text-[var(--ink)] leading-relaxed space-y-1">
@@ -8454,291 +8876,6 @@ export default function App() {
               </div>
             )}
 
-            {/* TAB: URGENT WEATHER & COMPREHENSIVE BRIEF MANAGER */}
-            {adminTab === 'weather' && (
-              <div className="space-y-4">
-                {/* OWNER MASTER KILL-SWITCH: Prevent all notifications permanently for all visitors */}
-                <div
-                  className={`border rounded-2xl p-4 space-y-2.5 shadow-sm transition-colors ${
-                    notificationsPermanentlyDisabled
-                      ? 'bg-rose-500/10 border-rose-500/40'
-                      : 'bg-[var(--card)] border-[var(--line)]'
-                  }`}
-                >
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <b className="text-sm text-[var(--ink)] flex items-center gap-1.5">
-                        <Shield className="w-4 h-4 text-rose-500 shrink-0" />
-                        <span>منع التنبيهات والموجز الشامل نهائياً لجميع الزوار (تحكم المالك)</span>
-                      </b>
-                      <p className="text-xs text-[var(--mute)] m-0 mt-0.5 leading-relaxed">
-                        عند تفعيل هذا الخيار، لن يظهر شريط الموجز الشامل أو أي تنبيه منبثق (سواء للأحوال الجوية أو الأخبار الموثقة) لأي زائر أو مستخدم نهائياً حتى تعيد تفعيله.
-                      </p>
-                    </div>
-
-                    <button
-                      type="button"
-                      disabled={isSavingGlobalNotifSetting}
-                      onClick={() =>
-                        handleSetNotificationsPermanentlyDisabled(!notificationsPermanentlyDisabled)
-                      }
-                      className={`min-h-[44px] px-4 py-2.5 rounded-xl text-xs font-extrabold transition-all cursor-pointer shrink-0 flex items-center justify-center gap-2 ${
-                        notificationsPermanentlyDisabled
-                          ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-xs'
-                          : 'bg-rose-600 hover:bg-rose-500 text-white shadow-xs'
-                      }`}
-                    >
-                      {notificationsPermanentlyDisabled ? (
-                        <>
-                          <Bell className="w-4 h-4" />
-                          <span>التنبيهات ممنوعة حالياً · اضغط لإعادة التفعيل</span>
-                        </>
-                      ) : (
-                        <>
-                          <BellOff className="w-4 h-4" />
-                          <span>منع التنبيهات نهائياً للزوار</span>
-                        </>
-                      )}
-                    </button>
-                  </div>
-                </div>
-
-                <div className="bg-[var(--card)] border border-[var(--line)] rounded-2xl p-4 space-y-3.5 shadow-sm">
-                  <div className="flex items-center justify-between border-b border-[var(--line)] pb-3">
-                    <div>
-                      <b className="text-sm text-[var(--ink)] block flex items-center gap-1.5">
-                        <Megaphone className="w-4 h-4 text-[var(--gold)]" />
-                        <span>إعداد الموجز الشامل (الأحوال الجوية + الأخبار الموثقة)</span>
-                      </b>
-                      <p className="text-xs text-[var(--mute)] m-0 mt-0.5">
-                        يعرض الموجز الشامل تنبيهات الطقس إلى جانب كل خبر موثق ومعتمد في التطبيق، ويمكن للزوار تصفحها داخل البطاقة.
-                      </p>
-                    </div>
-
-                    <button
-                      type="button"
-                      onClick={() => setEditAlertActive(!editAlertActive)}
-                      className={`min-h-[44px] min-w-[56px] px-2 rounded-full transition-colors relative cursor-pointer flex items-center ${
-                        editAlertActive ? 'bg-[var(--gold)]' : 'bg-[var(--line)]'
-                      }`}
-                    >
-                      <span
-                        className={`w-6 h-6 rounded-full bg-white transition-transform ${
-                          editAlertActive ? 'translate-x-0' : 'translate-x-6 rtl:-translate-x-6'
-                        }`}
-                      />
-                    </button>
-                  </div>
-
-                  {/* Preset Quick Templates */}
-                  <div className="space-y-1.5">
-                    <span className="text-[11px] text-[var(--mute)] font-semibold block">
-                      نماذج جاهزة للاختيار السريع:
-                    </span>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                      {WEATHER_PRESETS.map((preset, idx) => (
-                        <button
-                          key={idx}
-                          type="button"
-                          onClick={() => handleApplyPreset(preset)}
-                          className="min-h-[44px] p-2.5 rounded-xl bg-[var(--bg)] border border-[var(--line)] text-right hover:border-[var(--gold)] transition-colors cursor-pointer flex flex-col justify-center"
-                        >
-                          <span className="text-xs font-bold text-[var(--ink)] block">{preset.name}</span>
-                          <span className="text-[10px] text-[var(--mute)] line-clamp-1">{preset.title}</span>
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* Severity Selector */}
-                  <div className="space-y-1.5">
-                    <label className="text-xs font-semibold text-[var(--ink)] block">
-                      درجة خطورة التنبيه واللون:
-                    </label>
-                    <div className="grid grid-cols-3 gap-2">
-                      <button
-                        type="button"
-                        onClick={() => setEditAlertSeverity('warning')}
-                        className={`min-h-[44px] p-2.5 rounded-xl border text-xs font-bold text-center cursor-pointer transition-all flex items-center justify-center gap-1 ${
-                          editAlertSeverity === 'warning'
-                            ? 'bg-amber-500/20 border-amber-500 text-amber-500 ring-2 ring-amber-500/30'
-                            : 'bg-[var(--bg)] border-[var(--line)] text-[var(--mute)]'
-                        }`}
-                      >
-                        ⚠️ تحذير (برتقالي / ذهبي)
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => setEditAlertSeverity('danger')}
-                        className={`min-h-[44px] p-2.5 rounded-xl border text-xs font-bold text-center cursor-pointer transition-all flex items-center justify-center gap-1 ${
-                          editAlertSeverity === 'danger'
-                            ? 'bg-rose-500/20 border-rose-500 text-rose-500 ring-2 ring-rose-500/30'
-                            : 'bg-[var(--bg)] border-[var(--line)] text-[var(--mute)]'
-                        }`}
-                      >
-                        🚨 خطر شديد (أحمر ناري)
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => setEditAlertSeverity('info')}
-                        className={`min-h-[44px] p-2.5 rounded-xl border text-xs font-bold text-center cursor-pointer transition-all flex items-center justify-center gap-1 ${
-                          editAlertSeverity === 'info'
-                            ? 'bg-emerald-500/20 border-emerald-500 text-emerald-500 ring-2 ring-emerald-500/30'
-                            : 'bg-[var(--bg)] border-[var(--line)] text-[var(--mute)]'
-                        }`}
-                      >
-                        ℹ️ إشعار عام (أخضر هادئ)
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Title & Message Inputs */}
-                  <div className="space-y-3">
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      <div>
-                        <label className="text-xs font-semibold text-[var(--ink)] block mb-1">
-                          نوع البيانات وموثوقية التنبيه:
-                        </label>
-                        <select
-                          value={editAlertDataType}
-                          onChange={(e) => setEditAlertDataType(e.target.value as 'live' | 'simulation')}
-                          className="admin-input-field w-full min-h-[44px] border border-[var(--line)] bg-[var(--bg)] text-[var(--ink)] rounded-xl px-3 py-2 text-xs font-semibold focus:outline-none focus:border-[var(--gold)]"
-                        >
-                          <option value="live">🟢 نشرة رسمية حية موثقة ميدانياً</option>
-                          <option value="simulation">🧪 بيانات تجريبية / محاكاة تدريبية (اختبار)</option>
-                        </select>
-                      </div>
-
-                      <div>
-                        <label className="text-xs font-semibold text-[var(--ink)] block mb-1">
-                          وقت الانتهاء التلقائي للتنبيه (Expire Duration):
-                        </label>
-                        <select
-                          value={editAlertDurationHours}
-                          onChange={(e) => setEditAlertDurationHours(Number(e.target.value))}
-                          className="admin-input-field w-full min-h-[44px] border border-[var(--line)] bg-[var(--bg)] text-[var(--ink)] rounded-xl px-3 py-2 text-xs font-semibold focus:outline-none focus:border-[var(--gold)]"
-                        >
-                          <option value={2}>ينتهي تلقائياً بعد ساعتين (2h)</option>
-                          <option value={6}>ينتهي تلقائياً بعد 6 ساعات (6h)</option>
-                          <option value={12}>ينتهي تلقائياً بعد 12 ساعة (12h)</option>
-                          <option value={24}>ينتهي تلقائياً بعد 24 ساعة (يوم كامل)</option>
-                          <option value={48}>ينتهي تلقائياً بعد 48 ساعة (يومين)</option>
-                        </select>
-                      </div>
-                    </div>
-
-                    <div>
-                      <label className="text-xs font-semibold text-[var(--ink)] block mb-1">
-                        الجهة المصدرة للتنبيه (المصدر الرسمي المعتمد):
-                      </label>
-                      <input
-                        type="text"
-                        value={editAlertSource}
-                        onChange={(e) => setEditAlertSource(e.target.value)}
-                        placeholder="مثال: الديوان الوطني للأرصاد الجوية (ONM) / خلية اليقظة لولاية عين صالح"
-                        className="admin-input-field w-full min-h-[44px] border border-[var(--line)] bg-[var(--bg)] text-[var(--ink)] rounded-xl px-3.5 py-2 text-xs font-semibold focus:outline-none focus:border-[var(--gold)]"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="text-xs font-semibold text-[var(--ink)] block mb-1">
-                        عنوان التنبيه العاجل:
-                      </label>
-                      <input
-                        type="text"
-                        value={editAlertTitle}
-                        onChange={(e) => setEditAlertTitle(e.target.value)}
-                        placeholder="مثال: تنبيه جوي عاجل: رياح رملية قوية على طريق تمنراست..."
-                        className="admin-input-field w-full min-h-[44px] border border-[var(--line)] bg-[var(--bg)] text-[var(--ink)] rounded-xl px-3.5 py-2 text-xs font-semibold focus:outline-none focus:border-[var(--gold)]"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="text-xs font-semibold text-[var(--ink)] block mb-1">
-                        تفاصيل التنبيه وتوجيهات السلامة:
-                      </label>
-                      <textarea
-                        value={editAlertMessage}
-                        onChange={(e) => setEditAlertMessage(e.target.value)}
-                        rows={3}
-                        placeholder="نص التنبيه وإرشادات السائقين والمسافرين..."
-                        className="admin-input-field w-full border border-[var(--line)] bg-[var(--bg)] text-[var(--ink)] rounded-xl p-3 text-xs leading-relaxed focus:outline-none focus:border-[var(--gold)] resize-none"
-                      />
-                    </div>
-                  </div>
-
-                  {/* Save Button */}
-                  <div className="flex items-center gap-2 pt-2">
-                    <button
-                      type="button"
-                      onClick={handleSaveWeatherAlert}
-                      className="flex-1 min-h-[44px] bg-[var(--gold)] text-black rounded-xl py-2.5 px-4 text-xs font-black flex items-center justify-center gap-2 shadow-md hover:bg-amber-400 transition-colors cursor-pointer"
-                    >
-                      <Check className="w-4 h-4" />
-                      <span>حفظ واعتماد التنبيه الجوي فوراً</span>
-                    </button>
-
-                    {weatherAlert.active && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setEditAlertActive(false);
-                          setWeatherAlert((prev) => ({ ...prev, active: false }));
-                        }}
-                        className="min-h-[44px] px-4 py-2.5 rounded-xl border border-[var(--bad)] text-[var(--bad)] hover:bg-[var(--bad)]/10 text-xs font-bold cursor-pointer"
-                      >
-                        إلغاء التنبيه
-                      </button>
-                    )}
-                  </div>
-
-                  {alertSaveSuccess && (
-                    <div className="p-2.5 bg-emerald-500/20 border border-emerald-500 text-emerald-400 rounded-xl text-xs text-center font-bold animate-in fade-in">
-                      ✓ تم تحديث التنبيه الجوي العاجل بنجاح وسيظهر لكل من يفتح صفحة المساعد!
-                    </div>
-                  )}
-                </div>
-
-                {/* Live Banner Preview for Admin */}
-                <div className="space-y-1.5">
-                  <span className="text-xs font-semibold text-[var(--mute)] px-1 block">
-                    معاينة حية لشكل التنبيه في صفحة المساعد:
-                  </span>
-                  <div
-                    className={`rounded-2xl border-2 p-3.5 shadow-lg ${getAlertStyle(
-                      editAlertSeverity
-                    ).bg}`}
-                  >
-                    <div className="flex items-start gap-2.5">
-                      <div className="p-2 rounded-xl bg-black/20 text-white shrink-0 mt-0.5">
-                        <Wind className="w-4 h-4 text-white" />
-                      </div>
-                      <div className="flex-1">
-                        <div className="flex items-center gap-2 mb-1">
-                          <span
-                            className={`text-[9px] font-black uppercase px-2 py-0.5 rounded-full ${getAlertStyle(
-                              editAlertSeverity
-                            ).badge}`}
-                          >
-                            تنبيه جوي عاجل
-                          </span>
-                          <span className="text-[10px] opacity-75">الآن</span>
-                        </div>
-                        <h4 className="text-xs font-bold text-white m-0">
-                          {editAlertTitle || 'عنوان التنبيه'}
-                        </h4>
-                        <p className="text-[11px] text-white/90 mt-1 mb-0 leading-relaxed">
-                          {editAlertMessage || 'تفاصيل التنبيه...'}
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
-
             {/* TAB 1: SECTION 1 - المستجدات والأخبار (معلّق، منشور، مرفوض، إضافة، اعتماد ونشر) */}
             {adminTab === 'news' && (
               <div className="space-y-4">
@@ -9073,6 +9210,39 @@ export default function App() {
 
                                 <button
                                   type="button"
+                                  onClick={() => {
+                                    const targetName = item.authorName || item.s || 'مراسل';
+                                    const already = isTargetBanned(targetName);
+                                    if (already) {
+                                      removeBanEntry(already.id);
+                                      pushInAppNotification({
+                                        type: 'system',
+                                        title: 'فك الحظر',
+                                        message: `تم فك الحظر عن «${targetName}» بنجاح.`,
+                                      });
+                                    } else {
+                                      addBanEntry({
+                                        target: targetName,
+                                        type: 'sender',
+                                        section: 'news',
+                                        reason: `خبر مخالف: ${item.t.slice(0, 45)}`,
+                                      });
+                                      pushInAppNotification({
+                                        type: 'system',
+                                        title: 'حظر ناشر في قسم الأخبار',
+                                        message: `تم حظر «${targetName}» وإضافته إلى قائمة المحظورين.`,
+                                      });
+                                    }
+                                  }}
+                                  className="min-h-[44px] px-3.5 py-2.5 rounded-xl border border-amber-500/30 bg-amber-500/10 text-amber-600 dark:text-amber-400 hover:bg-amber-500/20 text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer transition-colors"
+                                  title="حظر الناشر أو المصدر وإضافته لقائمة الحظر"
+                                >
+                                  <Ban className="w-3.5 h-3.5" />
+                                  <span>{isTargetBanned(item.authorName, item.s) ? 'فك الحظر' : 'حظر الناشر'}</span>
+                                </button>
+
+                                <button
+                                  type="button"
                                   onClick={() => handleDeleteNews(item.id)}
                                   className="min-h-[44px] px-3.5 py-2.5 rounded-xl border border-rose-500/20 text-rose-500 hover:bg-rose-500/10 text-xs font-bold flex items-center justify-center gap-1 cursor-pointer transition-colors"
                                   title="حذف نهائي من قاعدة البيانات"
@@ -9243,15 +9413,6 @@ export default function App() {
                   {/* Sound Test / Preview Buttons */}
                   <div className="pt-2 border-t border-[var(--line)]/60 flex flex-wrap items-center gap-2">
                     <span className="text-[10px] text-[var(--mute)] font-medium">تجربة النغمة:</span>
-                    <button
-                      type="button"
-                      onClick={() => playAlertChime('weather', true)}
-                      className="min-h-[44px] px-3.5 py-2 rounded-xl bg-[var(--bg)] border border-[var(--line)] hover:border-[var(--gold)] text-xs font-bold text-[var(--ink)] flex items-center justify-center gap-1.5 cursor-pointer transition-colors"
-                      title="تجربة نغمة الطقس العاجل"
-                    >
-                      <span>🌪️ نغمة الطقس</span>
-                    </button>
-
                     <button
                       type="button"
                       onClick={() => playAlertChime('news', true)}
@@ -9502,9 +9663,6 @@ export default function App() {
               <h2 className="text-base font-bold text-[var(--ink)] m-0">{t.desertTitle}</h2>
             </div>
 
-            {/* 5-Day Visual Temperature Forecast (Recharts) */}
-            <WeatherForecastChart lang={lang} />
-
             {/* Trip Tracker Card */}
             <div className="bg-[var(--card)] border border-[var(--line)] rounded-2xl p-4 space-y-3 shadow-sm">
               {!trip ? (
@@ -9635,7 +9793,7 @@ export default function App() {
                 <b className="text-sm text-[var(--ink)]">{t.survivalChecklistTitle}</b>
               </div>
               <ul className={`text-xs text-[var(--ink)] space-y-1.5 ${lang === 'ar' ? 'pr-4' : 'pl-4'} m-0 leading-relaxed list-disc`}>
-                {t.checklistItems.map((item, cIdx) => (
+                {(lang === 'ar' && customDesertChecklist.length > 0 ? customDesertChecklist : t.checklistItems).map((item, cIdx) => (
                   <li key={cIdx}>{item}</li>
                 ))}
               </ul>
@@ -9707,62 +9865,136 @@ export default function App() {
 
       </main>
 
-      {/* Visitor Location & Wilaya Detection Modal */}
-      <LocationSelectorModal
-        isOpen={isLocationModalOpen}
-        onClose={() => setIsLocationModalOpen(false)}
-        currentLocation={visitorLocation}
-        onSelectLocation={(newLoc) => {
-          setVisitorLocation(newLoc);
-          localStorage.setItem('visitor_location', JSON.stringify(newLoc));
-          pushInAppNotification({
-            type: 'system',
-            title: t.locationUpdated,
-            message: `${t.yourLocation}: ${
-              lang === 'ar' ? newLoc.wilaya.nameAr : lang === 'fr' ? newLoc.wilaya.nameFr : newLoc.wilaya.nameEn
-            } ${newLoc.wilaya.distanceFromInSalahKm > 0 ? `(${newLoc.wilaya.distanceFromInSalahKm} ${t.kmFromInSalah})` : ''}`,
-          });
-        }}
-        lang={lang}
-        t={t}
-      />
+      <Suspense fallback={null}>
+        {/* Visitor Location & Wilaya Detection Modal */}
+        {isLocationModalOpen && (
+          <LocationSelectorModal
+            isOpen={isLocationModalOpen}
+            onClose={() => setIsLocationModalOpen(false)}
+            currentLocation={visitorLocation}
+            onSelectLocation={(newLoc) => {
+              setVisitorLocation(newLoc);
+              localStorage.setItem('visitor_location', JSON.stringify(newLoc));
+              pushInAppNotification({
+                type: 'system',
+                title: t.locationUpdated,
+                message: `${t.yourLocation}: ${
+                  lang === 'ar' ? newLoc.wilaya.nameAr : lang === 'fr' ? newLoc.wilaya.nameFr : newLoc.wilaya.nameEn
+                } ${newLoc.wilaya.distanceFromInSalahKm > 0 ? `(${newLoc.wilaya.distanceFromInSalahKm} ${t.kmFromInSalah})` : ''}`,
+              });
+            }}
+            lang={lang}
+            t={t}
+          />
+        )}
 
-      {/* AI Training (SFT/RLHF) & RAG Knowledge Studio Modal */}
-      <TrainingAndRagStudioModal
-        isOpen={isTrainingStudioOpen}
-        onClose={() => setIsTrainingStudioOpen(false)}
-        lang={lang}
-        agents={resolvedAgents}
-        customAvatars={customAgentAvatars}
-        onUpdateAgentAvatar={handleUpdateAgentAvatar}
-        initialTab={trainingStudioInitialTab}
-      />
+        {/* AI Training (SFT/RLHF) & RAG Knowledge Studio Modal */}
+        {isTrainingStudioOpen && (
+          <TrainingAndRagStudioModal
+            isOpen={isTrainingStudioOpen}
+            onClose={() => setIsTrainingStudioOpen(false)}
+            lang={lang}
+            agents={resolvedAgents}
+            customAvatars={customAgentAvatars}
+            onUpdateAgentAvatar={handleUpdateAgentAvatar}
+            initialTab={trainingStudioInitialTab}
+          />
+        )}
 
-      {/* Developer API Explorer Modal */}
-      <ApiExplorerModal
-        isOpen={isApiExplorerOpen}
-        onClose={() => setIsApiExplorerOpen(false)}
-        lang={lang}
-      />
+        {/* Developer API Explorer Modal */}
+        {isApiExplorerOpen && (
+          <ApiExplorerModal
+            isOpen={isApiExplorerOpen}
+            onClose={() => setIsApiExplorerOpen(false)}
+            lang={lang}
+          />
+        )}
 
-      {/* Interactive 3D Tidikelt Oasis Tour Modal (Three.js) */}
-      <TidikeltOasis3DModal
-        isOpen={isOasis3DOpen}
-        onClose={() => setIsOasis3DOpen(false)}
-        onAskAiAboutLandmark={(_landmarkName, prompt) => {
-          setView('chat');
-          setInputText(prompt);
-        }}
-      />
+        {/* Interactive 3D Tidikelt Oasis Tour Modal (Three.js) */}
+        {isOasis3DOpen && (
+          <TidikeltOasis3DModal
+            isOpen={isOasis3DOpen}
+            onClose={() => setIsOasis3DOpen(false)}
+            onAskAiAboutLandmark={(_landmarkName, prompt) => {
+              setView('chat');
+              setInputText(prompt);
+            }}
+          />
+        )}
 
-      {/* Veo 3 Video Generation & Google Maps Grounding Studio Modal */}
-      <VeoAndMapsStudioModal
-        isOpen={isVeoMapsModalOpen}
-        initialTab={veoMapsInitialTab}
-        onClose={() => setIsVeoMapsModalOpen(false)}
-      />
+        {/* Veo 3 Video Generation & Google Maps Grounding Studio Modal */}
+        {isVeoMapsModalOpen && (
+          <VeoAndMapsStudioModal
+            isOpen={isVeoMapsModalOpen}
+            initialTab={veoMapsInitialTab}
+            onClose={() => setIsVeoMapsModalOpen(false)}
+          />
+        )}
 
-      {/* Floating In-App Notifications Toast Container (Comprehensive Brief: Weather + All Verified News) */}
+        {/* Official Download App Dialog (Android APK & iOS PWA Guide + Owner APK Manager) */}
+        {isDownloadModalOpen && (
+          <DownloadAppModal
+            isOpen={isDownloadModalOpen}
+            onClose={() => {
+              setIsDownloadModalOpen(false);
+              setDownloadModalOwnerMode(false);
+            }}
+            isAdminLoggedIn={isAdminLoggedIn}
+            openInOwnerMode={downloadModalOwnerMode}
+          />
+        )}
+
+        {/* User Long-Term Memory Preferences Modal */}
+        {isMemoryModalOpen && (
+          <LongTermMemoryModal
+            isOpen={isMemoryModalOpen}
+            onClose={() => setIsMemoryModalOpen(false)}
+            userId={firebaseUser?.uid || 'default_user'}
+          />
+        )}
+
+        {/* Gemini Multimodal Live API Bidirectional Voice & Vision Call Modal */}
+        {isLiveCallOpen && (
+          <LiveVoiceCallModal
+            isOpen={isLiveCallOpen}
+            onClose={() => setIsLiveCallOpen(false)}
+            appName={t.appName}
+            locationName={currentLocationDisplayName}
+            lang={lang}
+            onSaveCallTurn={(userText, assistantText) => {
+              const now = Date.now();
+              setMessages((prev) => {
+                const next = [...prev];
+                if (userText) {
+                  next.push({
+                    id: `live-u-${now}-${Math.random().toString(36).slice(2, 6)}`,
+                    role: 'me',
+                    text: `📞 ${userText}`,
+                    timestamp: now,
+                  });
+                }
+                if (assistantText) {
+                  next.push({
+                    id: `live-b-${now + 1}-${Math.random().toString(36).slice(2, 6)}`,
+                    role: 'bot',
+                    text: assistantText,
+                    timestamp: now + 1,
+                    agentId: selectedAgentId,
+                    sourceInfo: {
+                      engine: 'Gemini Multimodal Live API',
+                      model: 'gemini-3.8-live',
+                      badgeTitle: 'مكالمة صوتية مباشرة',
+                    },
+                  });
+                }
+                return next;
+              });
+            }}
+          />
+        )}
+      </Suspense>
+
+      {/* Floating In-App Notifications Toast Container */}
       <InAppNotificationToastContainer
         notifications={activeNotifications}
         onDismiss={dismissNotification}
@@ -9772,69 +10004,15 @@ export default function App() {
         onDisablePermanently={() => handleSetNotificationsPermanentlyDisabled(true)}
       />
 
-      {/* Official Download App Dialog (Android APK & iOS PWA Guide + Owner APK Manager) */}
-      <DownloadAppModal
-        isOpen={isDownloadModalOpen}
-        onClose={() => {
-          setIsDownloadModalOpen(false);
-          setDownloadModalOwnerMode(false);
-        }}
-        isAdminLoggedIn={isAdminLoggedIn}
-        openInOwnerMode={downloadModalOwnerMode}
-      />
-
       {/* Rafiq Al-Tariq Inter-Wilaya Ride Sharing Brain Modal */}
-      <RafiqAlTariqModal
-        isOpen={isRafiqModalOpen}
-        onClose={() => setIsRafiqModalOpen(false)}
-        lang={lang}
-        isAdminLoggedIn={isAdminLoggedIn}
-      />
-
-      {/* User Long-Term Memory Preferences Modal */}
-      <LongTermMemoryModal
-        isOpen={isMemoryModalOpen}
-        onClose={() => setIsMemoryModalOpen(false)}
-        userId={firebaseUser?.uid || 'default_user'}
-      />
-
-      {/* Gemini Multimodal Live API Bidirectional Voice & Vision Call Modal */}
-      <LiveVoiceCallModal
-        isOpen={isLiveCallOpen}
-        onClose={() => setIsLiveCallOpen(false)}
-        appName={t.appName}
-        locationName={currentLocationDisplayName}
-        lang={lang}
-        onSaveCallTurn={(userText, assistantText) => {
-          const now = Date.now();
-          setMessages((prev) => {
-            const next = [...prev];
-            if (userText) {
-              next.push({
-                id: `live-u-${now}-${Math.random().toString(36).slice(2, 6)}`,
-                role: 'me',
-                text: `📞 ${userText}`,
-                timestamp: now,
-              });
-            }
-            if (assistantText) {
-              next.push({
-                id: `live-b-${now + 1}-${Math.random().toString(36).slice(2, 6)}`,
-                role: 'bot',
-                text: assistantText,
-                timestamp: now + 1,
-                agentId: selectedAgentId,
-                sourceInfo: {
-                  engine: 'Gemini Multimodal Live API',
-                  model: 'gemini-3.8-live',
-                  badgeTitle: 'مكالمة صوتية مباشرة',
-                },
-              });
-            }
-            return next;
-          });
-        }}
-      />
+      {isRafiqModalOpen && (
+        <RafiqAlTariqModal
+          isOpen={isRafiqModalOpen}
+          onClose={() => setIsRafiqModalOpen(false)}
+          lang={lang}
+          isAdminLoggedIn={isAdminLoggedIn}
+        />
+      )}
 
       {/* Admin PIN Login Modal */}
       {showPinModal && (
